@@ -1,0 +1,188 @@
+/**
+ * Design Tokens CSS - Extracted from daniyalalam.online
+ * Replica-Design compliant visual system
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&family=Fragment+Mono&display=swap');
+
+:root {
+  /* --- Colors --- */
+  --color-bg: #d9d9d9;
+  --color-surface: #ffffff;
+  --color-surface-glass: rgba(255, 255, 255, 0.82);
+  --color-surface-dark: #141414;
+  --color-border: #e5e5e5;
+  --color-border-subtle: rgba(0, 0, 0, 0.06);
+  --color-border-glass: rgba(255, 255, 255, 0.5);
+  --color-border-input: #737373;
+  --color-text: #000000;
+  --color-text-secondary: #262626;
+  --color-text-muted: #666666;
+  --color-text-dark: #ffffff;
+  --color-accent: #ff3700;
+  --color-on-accent: #ffffff;
+  --color-danger: #e11d48;
+  --color-success: #16a34a;
+
+  /* --- Fonts --- */
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-sans: 'Inter Display', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Fragment Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* --- Spacing --- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 120px;
+
+  /* --- Border Radius --- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius-pill: 9999px;
+
+  /* --- Shadows --- */
+  /* Bento Card Multi-layer Tactile Shadow */
+  --shadow-card: 0px 0.5px 1.25px -1.25px rgba(0, 0, 0, 0.29),
+                 0px 1.83px 4.76px -2.5px rgba(0, 0, 0, 0.25),
+                 0px 8px 20.8px -3.75px rgba(0, 0, 0, 0.1);
+
+  /* Bento Card Ambient Highlight Ring + Soft Drop */
+  --shadow-card-ambient: 0px 0px 0px 8px rgba(255, 255, 255, 0.25),
+                         12px 16px 16px 0px rgba(0, 0, 0, 0.1);
+
+  /* Elevated Card / Showcase Item */
+  --shadow-card-elevated: 0px 0.75px 0.75px -0.63px rgba(0, 0, 0, 0.18),
+                          0px 1.93px 1.93px -1.25px rgba(0, 0, 0, 0.18),
+                          0px 3.86px 3.86px -1.88px rgba(0, 0, 0, 0.17),
+                          0px 7.32px 7.32px -2.5px rgba(0, 0, 0, 0.16),
+                          0px 14.56px 14.56px -3.13px rgba(0, 0, 0, 0.13),
+                          0px 32px 32px -3.75px rgba(0, 0, 0, 0.06),
+                          0px 0px 0px 7px rgb(255, 255, 255);
+
+  /* Primary Button Tactile Drop + Inset Bevel Shadow */
+  --shadow-button: 0.57px 0.57px 1.76px -0.42px rgba(0, 0, 0, 0.18),
+                   1.45px 1.45px 4.5px -0.83px rgba(0, 0, 0, 0.18),
+                   2.9px 2.9px 9px -1.25px rgba(0, 0, 0, 0.18),
+                   5.5px 5.5px 17.1px -1.67px rgba(0, 0, 0, 0.18),
+                   10.9px 10.9px 34px -2.08px rgba(0, 0, 0, 0.18),
+                   24px 24px 74.7px -2.5px rgba(0, 0, 0, 0.18),
+                   inset 0px -16px 48px 0px rgb(0, 0, 0);
+
+  /* Primary Button Hover State */
+  --shadow-button-hover: 0.57px 0.57px 1.76px -0.42px rgba(0, 0, 0, 0.22),
+                         1.45px 1.45px 4.5px -0.83px rgba(0, 0, 0, 0.22),
+                         2.9px 2.9px 9px -1.25px rgba(0, 0, 0, 0.22),
+                         5.5px 5.5px 17.1px -1.67px rgba(0, 0, 0, 0.22),
+                         10.9px 10.9px 34px -2.08px rgba(0, 0, 0, 0.22),
+                         24px 24px 74.7px -2.5px rgba(0, 0, 0, 0.22),
+                         inset 0px -16px 48px 0px rgb(64, 64, 64);
+
+  /* Signature Orange Glow */
+  --shadow-accent-glow: 0px 0.62px 0.62px -0.7px rgba(255, 38, 0, 0.69),
+                        0px 1.7px 1.7px -1.4px rgba(255, 38, 0, 0.67),
+                        0px 3.72px 3.72px -2.1px rgba(255, 38, 0, 0.63),
+                        0px 8.26px 8.26px -2.8px rgba(255, 38, 0, 0.54),
+                        0px 21px 21px -3.5px rgba(255, 38, 0, 0.3);
+
+  /* Sticky Scroll Header Shadow */
+  --shadow-scroll-header: 0 1px 2px rgba(0, 0, 0, 0.05),
+                          0 4px 12px rgba(0, 0, 0, 0.08),
+                          0 16px 32px -4px rgba(0, 0, 0, 0.06);
+
+  /* --- Transitions & Motion --- */
+  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-base: 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-slow: 400ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-spring: 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Base Body Application */
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Utility Classes */
+.font-editorial {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.font-mono-tag {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+/* Bento Card Style */
+.bento-card {
+  background-color: var(--color-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--color-border-subtle);
+  transition: transform var(--transition-base), box-shadow var(--transition-base);
+}
+
+.bento-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-ambient);
+}
+
+/* Tactile Pill Button */
+.btn-tactile {
+  background-color: var(--color-text);
+  color: var(--color-surface);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-button);
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  cursor: pointer;
+  user-select: none;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
+}
+
+.btn-tactile:hover {
+  transform: translateY(-1px) scale(1.01);
+  box-shadow: var(--shadow-button-hover);
+}
+
+.btn-tactile:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: var(--shadow-button);
+}
+
+/* Sticky Header with Scroll Elevation */
+.sticky-header {
+  position: sticky;
+  top: 16px;
+  z-index: 50;
+  transition: box-shadow var(--transition-base), background-color var(--transition-base), backdrop-filter var(--transition-base);
+}
+
+.sticky-header.scrolled {
+  background-color: var(--color-surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-scroll-header);
+  border: 1px solid var(--color-border-glass);
+}

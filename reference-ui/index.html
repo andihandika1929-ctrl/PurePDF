@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visual Design System Reference — Clean-Room Replica</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fragment+Mono&family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Design Tokens -->
+  <link rel="stylesheet" href="./tokens.css">
+  
+  <!-- Tailwind CSS CDN for demo rendering -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#d9d9d9',
+            surface: '#ffffff',
+            'surface-glass': 'rgba(255, 255, 255, 0.82)',
+            'surface-dark': '#141414',
+            accent: '#ff3700',
+            'accent-glow': 'rgba(255, 55, 0, 0.4)',
+            'text-secondary': '#262626',
+            'text-muted': '#666666'
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            serif: ['"Instrument Serif"', 'Georgia', 'serif'],
+            mono: ['"Fragment Mono"', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-[#d9d9d9] text-black font-sans min-h-screen selection:bg-[#ff3700] selection:text-white pb-32">
+
+  <!-- Sticky Navbar with Dynamic Scroll Shadow -->
+  <header id="main-nav" class="sticky top-4 z-50 w-full px-4 sm:px-8 max-w-7xl mx-auto transition-all duration-300">
+    <div id="nav-inner" class="flex items-center justify-between h-14 sm:h-16 px-4 rounded-full transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]">
+      
+      <!-- Wordmark Pill -->
+      <div class="flex items-center gap-1.5 h-11 px-5 rounded-full bg-white text-black border border-black/[0.06] shadow-[0px_1px_3px_rgba(0,0,0,0.08)] select-none">
+        <span class="font-bold text-sm tracking-tight">DESIGN</span>
+        <span class="font-editorial text-base text-neutral-800">System</span>
+      </div>
+
+      <!-- Action Controls -->
+      <div class="flex items-center gap-2 sm:gap-3">
+        <button class="btn-tactile hidden sm:inline-flex !h-10 !text-xs !px-5">
+          <span>Action Trigger</span>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+        </button>
+
+        <button aria-label="Menu" class="flex items-center justify-center w-10 h-10 rounded-full bg-white text-black border border-black/[0.06] shadow-[0px_1px_3px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 hover:shadow-[0px_2px_6px_rgba(0,0,0,0.12)] active:translate-y-0.5 active:scale-95 transition-all duration-200">
+          <div class="flex flex-col gap-1 w-4">
+            <span class="w-full h-0.5 bg-black rounded-full"></span>
+            <span class="w-full h-0.5 bg-black rounded-full"></span>
+          </div>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Main Showcase Container -->
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 pt-12 space-y-16">
+
+    <!-- Hero / Header Section -->
+    <section class="space-y-6">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-black/10 shadow-[0px_1px_2px_rgba(0,0,0,0.04)] text-xs font-mono font-medium">
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
+        REPLICA SYSTEM SPECIFICATION
+      </div>
+
+      <h1 class="text-4xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-black max-w-4xl leading-[1.08]">
+        Architecting tactile visual structures with <span class="font-editorial text-[#ff3700] font-normal">subtle digital depth</span> & precision.
+      </h1>
+
+      <p class="text-lg sm:text-xl text-[#262626] max-w-2xl font-normal leading-relaxed">
+        Extracted design tokens and primitive components replicating typography hierarchy, bento grid structures, layered multi-stop shadows, and scroll-elevation dynamics.
+      </p>
+
+      <div class="flex flex-wrap items-center gap-4 pt-2">
+        <button class="btn-tactile group">
+          <span>Primary CTA Button</span>
+          <svg class="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+        </button>
+
+        <button class="px-6 h-11 rounded-full bg-white text-black font-medium text-[15px] border border-black/10 shadow-[0px_1px_3px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 hover:shadow-[0px_4px_12px_rgba(0,0,0,0.08)] active:translate-y-0.5 active:scale-[0.98] transition-all duration-200">
+          Secondary Pill
+        </button>
+
+        <span class="text-xs font-mono text-[#666666] ml-2">← Click & hover to feel interaction physics</span>
+      </div>
+    </section>
+
+    <!-- Bento Grid Section -->
+    <section class="space-y-6">
+      <div class="flex items-baseline justify-between border-b border-black/10 pb-4">
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight">Bento Layout Architecture</h2>
+          <p class="text-sm text-[#666666] font-mono mt-0.5">12-column modular grid with multi-stop tactile elevation</p>
+        </div>
+        <span class="text-xs font-mono text-[#262626]">GRID_SPEC_V1</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
+
+        <!-- Bento Card 1 (Span 7) -->
+        <div class="md:col-span-7 bento-card p-6 sm:p-8 flex flex-col justify-between min-h-[300px]">
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono tracking-wider uppercase text-[#666666]">FEATURE_MODULE_01</span>
+              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#ff3700]/10 text-[#ff3700] border border-[#ff3700]/20">ACCENT GLOW</span>
+            </div>
+            <h3 class="text-2xl sm:text-3xl font-bold tracking-tight">
+              Tactile elevation with <span class="font-editorial text-2xl sm:text-3xl font-normal">three-layer</span> shadow diffusion.
+            </h3>
+            <p class="text-sm text-[#262626] leading-relaxed max-w-lg">
+              Cards simulate realistic paperweight surfaces on top of a neutral metallic canvas. Elevation expands smoothly on hover with an ambient highlight rim.
+            </p>
+          </div>
+          <div class="pt-6 flex items-center gap-3">
+            <span class="text-xs font-mono text-[#666666]">BORDER: 1px rgba(0,0,0,0.06)</span>
+            <span class="text-xs font-mono text-[#666666]">•</span>
+            <span class="text-xs font-mono text-[#666666]">RADIUS: 24px</span>
+          </div>
+        </div>
+
+        <!-- Bento Card 2 (Span 5 - Featured Dark Variant) -->
+        <div class="md:col-span-5 rounded-2xl bg-[#141414] text-white p-6 sm:p-8 flex flex-col justify-between border border-white/10 shadow-[0px_4px_24px_rgba(0,0,0,0.3)] hover:-translate-y-1 transition-all duration-300">
+          <div class="space-y-4">
+            <span class="text-xs font-mono tracking-wider uppercase text-neutral-400">INVERTED_SURFACE</span>
+            <h3 class="text-2xl font-bold tracking-tight">High-Contrast Dark Canvas</h3>
+            <p class="text-sm text-neutral-300 leading-relaxed">
+              Preserves deep ink-black grounding while maintaining clean contrast for technical data points and secondary callouts.
+            </p>
+          </div>
+          <div class="pt-6">
+            <button class="w-full py-3 px-4 rounded-full bg-white text-black text-sm font-semibold hover:bg-neutral-100 active:scale-95 transition-all">
+              Inspect Properties
+            </button>
+          </div>
+        </div>
+
+        <!-- Bento Card 3 (Span 4) -->
+        <div class="md:col-span-4 bento-card p-6 flex flex-col justify-between">
+          <div class="space-y-3">
+            <span class="text-xs font-mono text-[#666666]">01 / TYPOGRAPHY</span>
+            <h4 class="text-xl font-bold tracking-tight">Editorial Type Pair</h4>
+            <p class="text-xs text-[#666666] leading-relaxed">
+              Geometric grotesque paired with high-contrast serif italic creates human warmth inside technical layouts.
+            </p>
+          </div>
+          <div class="p-3 bg-neutral-100 rounded-xl mt-4 font-editorial text-lg text-neutral-800">
+            "Design is how it works."
+          </div>
+        </div>
+
+        <!-- Bento Card 4 (Span 4) -->
+        <div class="md:col-span-4 bento-card p-6 flex flex-col justify-between">
+          <div class="space-y-3">
+            <span class="text-xs font-mono text-[#666666]">02 / MOTION</span>
+            <h4 class="text-xl font-bold tracking-tight">Spring Physics</h4>
+            <p class="text-xs text-[#666666] leading-relaxed">
+              Transitions utilize <code class="font-mono text-[11px] bg-neutral-100 px-1 py-0.5 rounded">cubic-bezier(0.16, 1, 0.3, 1)</code> for swift entry and gentle landing.
+            </p>
+          </div>
+          <div class="h-10 bg-neutral-100 rounded-full flex items-center px-4 justify-between mt-4">
+            <span class="text-xs font-mono text-[#262626]">TRANSITION</span>
+            <span class="text-xs font-mono text-[#ff3700]">250ms</span>
+          </div>
+        </div>
+
+        <!-- Bento Card 5 (Span 4) -->
+        <div class="md:col-span-4 bento-card p-6 flex flex-col justify-between">
+          <div class="space-y-3">
+            <span class="text-xs font-mono text-[#666666]">03 / ACCENT</span>
+            <h4 class="text-xl font-bold tracking-tight">Safety Red-Orange</h4>
+            <p class="text-xs text-[#666666] leading-relaxed">
+              Color role <code class="font-mono text-[11px] bg-neutral-100 px-1 py-0.5 rounded">#ff3700</code> punches through monochromatic metallic surfaces.
+            </p>
+          </div>
+          <div class="h-10 rounded-full bg-[#ff3700] text-white flex items-center justify-center text-xs font-bold tracking-wide mt-4 shadow-[0px_0.62px_0.62px_-0.7px_rgba(255,38,0,0.69),0px_3.72px_3.72px_-2.1px_rgba(255,38,0,0.63)]">
+            #FF3700 ACCENT
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Scroll Shadow Demonstration Indicator -->
+    <section class="p-8 rounded-2xl bg-white/60 border border-black/10 backdrop-blur-sm text-center space-y-3">
+      <div class="inline-block p-2 rounded-full bg-black text-white">
+        <svg class="w-5 h-5 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+      </div>
+      <h3 class="text-lg font-bold">Scroll Down To Observe Dynamic Header Shadow</h3>
+      <p class="text-sm text-[#666666] max-w-md mx-auto">
+        As you scroll past 15px, the top navigation activates an elevated multi-stop shadow and frosted glassmorphism blur effect.
+      </p>
+    </section>
+
+    <!-- Spacer to demonstrate scrolling -->
+    <div class="h-96 flex items-center justify-center text-neutral-400 font-mono text-sm">
+      [ Extended Scroll Area ]
+    </div>
+
+  </main>
+
+  <!-- Script for Scroll Shadow Interaction -->
+  <script>
+    const navInner = document.getElementById('nav-inner');
+    const handleScroll = () => {
+      if (window.scrollY > 15) {
+        navInner.classList.add(
+          'bg-white/85',
+          'backdrop-blur-md',
+          'border',
+          'border-white/60',
+          'shadow-[0_1px_2px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.08),0_16px_32px_-4px_rgba(0,0,0,0.06)]'
+        );
+        navInner.classList.remove('bg-transparent', 'border-transparent');
+      } else {
+        navInner.classList.remove(
+          'bg-white/85',
+          'backdrop-blur-md',
+          'border',
+          'border-white/60',
+          'shadow-[0_1px_2px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.08),0_16px_32px_-4px_rgba(0,0,0,0.06)]'
+        );
+        navInner.classList.add('bg-transparent', 'border-transparent');
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+  </script>
+
+</body>
+</html>
