@@ -30,13 +30,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS configuration
-origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
-origins = [o.strip() for o in origins_env.split(",") if o.strip()]
-
+# CORS configuration for cloud deployment (allows Vercel, localhost, and custom domains)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins or ["*"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
