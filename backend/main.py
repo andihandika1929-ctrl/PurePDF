@@ -21,7 +21,7 @@ from services.ai_ocr_service import (
     neural_font_match,
     process_scanned_pdf_ai_edit,
 )
-from services.scan_editor_service import scan_document_for_editor
+from services.scan_editor_service import scan_document_for_editor, apply_scan_edits_to_pdf
 
 load_dotenv()
 
@@ -263,16 +263,52 @@ async def api_scan_editor(
     current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
-    Scan document page for Interactive Canvas Editor.
-    Returns page dimensions, rendered base64 image, and precision-detected text blocks
-    with sampled authentic bgColor, textColor, fontSize, and percentage bounding boxes.
+    Stage 1: Render page (180 DPI), detect text bounding boxes via PyMuPDF/Tesseract OCR,
+    and sample natural ink color + font size.
     """
     try:
         content = await read_upload_with_limit(file)
         data = scan_document_for_editor(content, page_index=page_index)
         return JSONResponse(content=data)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scan editor failed: {str(e)}")
+
+
+@app.post("/api/ai/scan-editor/apply")
+async def api_scan_editor_apply(
+    file: UploadFile = File(...),
+    edits: str = Form("[]"),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
+):
+    """
+    Stages 2-4: Deduct PRO AI quota atomically on server, run stroke-accurate OpenCV
+    Telea inpainting + anti-aliased text rendering page-by-page, and return clean PDF.
+    """
+    await consume_ai_quota_server(current_user["id"], cost=2)
+    try:
+        content = await read_upload_with_limit(file)
+        try:
+            edit_list = json.loads(edits) if edits else []
+            if not isinstance(edit_list, list):
+                edit_list = []
+        except Exception:
+            edit_list = []
+
+        result_pdf_bytes = apply_scan_edits_to_pdf(content, edit_list)
+        filename = file.filename or "scanned_document.pdf"
+        out_name = f"{os.path.splitext(filename)[0]}_ai_edited.pdf"
+
+        return Response(
+            content=result_pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to apply scan edits: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

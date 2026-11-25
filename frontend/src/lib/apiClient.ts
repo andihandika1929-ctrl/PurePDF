@@ -212,8 +212,29 @@ export interface ScanEditorResponse {
   pageHeight: number;
   pixelWidth: number;
   pixelHeight: number;
+  skewAngle?: number;
+  ocrEngine?: string;
   image: string;       // base64 data:image/jpeg;base64,...
   blocks: ScanEditorBlock[];
+}
+
+export interface ScanEditItem {
+  pageIndex: number;
+  blockId?: string;
+  bbox: {
+    x: number;      // percentage [0..100]
+    y: number;      // percentage [0..100]
+    width: number;  // percentage [0..100]
+    height: number; // percentage [0..100]
+  };
+  mode: 'erase' | 'replace';
+  newText?: string;
+  offsetX?: number; // px fine-tune offset at rendered DPI
+  offsetY?: number; // px fine-tune offset at rendered DPI
+  fontSize?: number;
+  fontFamily?: 'serif' | 'sans' | 'mono';
+  isBold?: boolean;
+  textColor?: string;
 }
 
 export async function apiScanEditor(
@@ -232,9 +253,30 @@ export async function apiScanEditor(
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(errText || `Failed to scan document: HTTP ${res.status}`);
+    throw await parseBackendError(res, `Failed to scan document (HTTP ${res.status}).`);
   }
 
   return await res.json();
+}
+
+export async function apiApplyScanEdits(
+  file: File,
+  edits: ScanEditItem[]
+): Promise<Blob> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('edits', JSON.stringify(edits));
+
+  const authHeaders = await getAuthHeaders();
+  const res = await fetch(`${BACKEND_URL}/api/ai/scan-editor/apply`, {
+    method: 'POST',
+    headers: authHeaders,
+    body: formData,
+  });
+
+  if (!res.ok) {
+    throw await parseBackendError(res, `Failed to apply scan edits (HTTP ${res.status}).`);
+  }
+
+  return await res.blob();
 }

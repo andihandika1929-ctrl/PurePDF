@@ -379,17 +379,10 @@ export const DropzoneUploader: React.FC<{
       }
 
       if (tool.slug === 'ai-edit-pdf') {
-        if (tool.isComingSoon) {
-          throw new Error(
-            isId
-              ? 'Fitur AI Edit PDF Scan & Screenshot sedang dalam pengembangan dan segera hadir.'
-              : 'AI Edit Scanned & Screenshot PDF is currently under development and coming soon.'
-          );
-        }
         setStatusMessage(
           isId
-            ? 'Memindai area teks & warna dokumen...'
-            : 'Scanning document text & color boundaries...'
+            ? 'Memindai teks OCR & tekstur kertas dokumen...'
+            : 'Scanning OCR text boxes & paper texture...'
         );
         setProgress(40);
         try {
@@ -397,18 +390,30 @@ export const DropzoneUploader: React.FC<{
           setProgress(90);
           setStatusMessage(
             isId
-              ? 'Menyiapkan kanvas editor...'
-              : 'Initializing interactive canvas editor...'
+              ? 'Menyiapkan editor visual interaktif...'
+              : 'Initializing interactive visual editor...'
           );
           setScanEditorData(scanRes);
           setIsEditorActive(true);
           setIsProcessing(false);
           return;
         } catch (backendErr: any) {
+          if (backendErr?.status === 401) {
+            openAuthModal('login');
+            throw new Error(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+          }
+          if (backendErr?.status === 402) {
+            setActiveProToolName(toolName);
+            setPaywallOpen(true);
+            throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
+          }
+          if (backendErr?.status === 413) {
+            throw new Error(backendErr.message);
+          }
           throw new Error(
             isId
-              ? `⚠️ Layanan pemrosesan dokumen belum aktif di ${BACKEND_URL}. Silakan mulai server backend Python.`
-              : `⚠️ Document processing service is offline at ${BACKEND_URL}. Please start the backend service.`
+              ? 'Server AI sedang sibuk atau bangun dari mode tidur. Mohon coba beberapa detik lagi.'
+              : 'The AI server is currently waking up or busy. Please try again in a few seconds.'
           );
         }
       }
@@ -780,6 +785,8 @@ export const DropzoneUploader: React.FC<{
         accept={
           isImageToPdf
             ? '.jpg,.jpeg,.png,.webp'
+            : tool.slug === 'ai-edit-pdf'
+            ? '.pdf,.jpg,.jpeg,.png,.webp'
             : tool.slug === 'word-to-pdf'
             ? '.docx,.doc,.txt'
             : tool.slug === 'excel-to-pdf'
@@ -829,6 +836,9 @@ export const DropzoneUploader: React.FC<{
             setScanEditorData(null);
           }}
           onDownload={(finalBlob, filename) => {
+            refreshUserProfile().catch(() => {});
+            setIsEditorActive(false);
+            setScanEditorData(null);
             handoffDownload(finalBlob, filename, 'application/pdf');
           }}
         />

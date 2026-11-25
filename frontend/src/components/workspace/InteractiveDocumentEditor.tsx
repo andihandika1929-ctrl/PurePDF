@@ -1,45 +1,35 @@
-// frontend/src/components/workspace/InteractiveDocumentEditor.tsx
-// Architecture: Fabric.js + pdfjs-dist unified canvas pipeline (Stirling-PDF inspired)
-// - Single canvas coordinate space: 0px shift between preview and export
-// - High-resolution PDF/image base rendered directly into fabric.Canvas
-// - Hitbox detection: Transparent interactive hitboxes on hover, instant seamless edit on click
-// - Sampling: Authentic paper color sampled 2px outside origBbox, strictly 0px vertical bleed
-// - Tools: 20+ Google Fonts + Custom Upload, Whiteout, Eyedropper, Alignment, 8-point handles, Fine-nudge
-
 'use client';
 
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import * as fabric from 'fabric';
-import { ScanEditorBlock, ScanEditorResponse, apiScanEditor } from '@/lib/apiClient';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  ScanEditorBlock,
+  ScanEditorResponse,
+  ScanEditItem,
+  apiScanEditor,
+  apiApplyScanEdits,
+} from '@/lib/apiClient';
+import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/Button';
-import { PDFDocument } from 'pdf-lib';
-import { getPdfJs } from '@/lib/clientPdfOps';
 import {
   ArrowLeft,
-  Download,
-  Plus,
-  Trash2,
-  ZoomIn,
-  ZoomOut,
   ChevronLeft,
   ChevronRight,
-  Bold,
-  Italic,
-  Underline as UnderlineIcon,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  AlignJustify,
+  Download,
+  Eraser,
   Type,
-  Image as ImageIcon,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+  Eye,
+  EyeOff,
   Loader2,
-  Upload,
-  Check,
-  Search,
-  ChevronDown,
-  Square,
+  Bold,
   Pipette,
-  MousePointer
+  Sparkles,
+  AlertCircle,
+  Check,
+  MoveHorizontal,
+  MoveVertical,
 } from 'lucide-react';
 
 interface InteractiveDocumentEditorProps {
@@ -50,55 +40,36 @@ interface InteractiveDocumentEditorProps {
   onDownload: (blob: Blob, filename: string) => void;
 }
 
-export interface FontOption {
-  label: string;
-  value: string;
-  category: 'formal_serif' | 'modern_sans' | 'condensed' | 'monospace' | 'slab_serif' | 'script' | 'custom';
-  categoryLabel: string;
-  isCustom?: boolean;
+type FontFamilyChoice = 'serif' | 'sans' | 'mono';
+
+interface BlockEditState {
+  pageIndex: number;
+  blockId: string;
+  bbox: ScanEditorBlock['bbox'];
+  originalText: string;
+  mode: 'erase' | 'replace';
+  newText: string;
+  offsetX: number;
+  offsetY: number;
+  fontSize: number;
+  fontFamily: FontFamilyChoice;
+  isBold: boolean;
+  textColor: string;
+  autoTextColor: string;
 }
 
-// 20+ Versatile Google Fonts covering Formal Serif, Modern Sans, Condensed, Monospace, Slab Serif, and Script
-export const GOOGLE_FONT_CATALOG: FontOption[] = [
-  // 1. Formal Serif (Standard for formal letters, legal documents, contracts)
-  { label: 'Times New Roman', value: "'Times New Roman', Times, serif", category: 'formal_serif', categoryLabel: 'Formal Serif' },
-  { label: 'Merriweather', value: "'Merriweather', serif", category: 'formal_serif', categoryLabel: 'Formal Serif' },
-  { label: 'Playfair Display', value: "'Playfair Display', serif", category: 'formal_serif', categoryLabel: 'Formal Serif' },
-  { label: 'Lora', value: "'Lora', serif", category: 'formal_serif', categoryLabel: 'Formal Serif' },
-  { label: 'Georgia', value: "Georgia, serif", category: 'formal_serif', categoryLabel: 'Formal Serif' },
-  { label: 'EB Garamond', value: "'EB Garamond', Garamond, serif", category: 'formal_serif', categoryLabel: 'Formal Serif' },
+function normalizeFontChoice(family?: string, category?: string): FontFamilyChoice {
+  const raw = `${family || ''} ${category || ''}`.toLowerCase();
+  if (raw.includes('mono') || raw.includes('courier') || raw.includes('consolas')) return 'mono';
+  if (raw.includes('serif') || raw.includes('times') || raw.includes('georgia')) return 'serif';
+  return 'sans';
+}
 
-  // 2. Modern & Geometric Sans-Serif (Standard for headers, logos, clean text)
-  { label: 'Inter', value: "'Inter', sans-serif", category: 'modern_sans', categoryLabel: 'Modern Sans' },
-  { label: 'Arial', value: "Arial, sans-serif", category: 'modern_sans', categoryLabel: 'Modern Sans' },
-  { label: 'Roboto', value: "'Roboto', sans-serif", category: 'modern_sans', categoryLabel: 'Modern Sans' },
-  { label: 'Montserrat', value: "'Montserrat', sans-serif", category: 'modern_sans', categoryLabel: 'Modern Sans' },
-  { label: 'Open Sans', value: "'Open Sans', sans-serif", category: 'modern_sans', categoryLabel: 'Modern Sans' },
-  { label: 'Poppins', value: "'Poppins', sans-serif", category: 'modern_sans', categoryLabel: 'Modern Sans' },
-  { label: 'Lato', value: "'Lato', sans-serif", category: 'modern_sans', categoryLabel: 'Modern Sans' },
-
-  // 3. Condensed / Narrow (for dense tables, receipts, invoices)
-  { label: 'Oswald', value: "'Oswald', sans-serif", category: 'condensed', categoryLabel: 'Condensed / Narrow' },
-  { label: 'Roboto Condensed', value: "'Roboto Condensed', sans-serif", category: 'condensed', categoryLabel: 'Condensed / Narrow' },
-  { label: 'Barlow Semi Condensed', value: "'Barlow Semi Condensed', sans-serif", category: 'condensed', categoryLabel: 'Condensed / Narrow' },
-
-  // 4. Monospace / Typewriter (for numbers, codes, old typed documents)
-  { label: 'Courier New', value: "'Courier New', Courier, monospace", category: 'monospace', categoryLabel: 'Monospace / Typewriter' },
-  { label: 'JetBrains Mono', value: "'JetBrains Mono', monospace", category: 'monospace', categoryLabel: 'Monospace / Typewriter' },
-  { label: 'Space Mono', value: "'Space Mono', monospace", category: 'monospace', categoryLabel: 'Monospace / Typewriter' },
-
-  // 5. Slab Serif (for bold letterheads, headers)
-  { label: 'Roboto Slab', value: "'Roboto Slab', serif", category: 'slab_serif', categoryLabel: 'Slab Serif' },
-  { label: 'Arvo', value: "'Arvo', serif", category: 'slab_serif', categoryLabel: 'Slab Serif' },
-  { label: 'Rokkitt', value: "'Rokkitt', serif", category: 'slab_serif', categoryLabel: 'Slab Serif' },
-
-  // 6. Script / Handwriting (for certificates, signatures, cursive)
-  { label: 'Caveat', value: "'Caveat', cursive", category: 'script', categoryLabel: 'Script / Handwriting' },
-  { label: 'Dancing Script', value: "'Dancing Script', cursive", category: 'script', categoryLabel: 'Script / Handwriting' },
-  { label: 'Pacifico', value: "'Pacifico', cursive", category: 'script', categoryLabel: 'Script / Handwriting' },
-];
-
-type EditorTool = 'select' | 'text' | 'whiteout' | 'eyedropper';
+function fontChoiceToCss(choice: FontFamilyChoice): string {
+  if (choice === 'serif') return "'Times New Roman', Georgia, serif";
+  if (choice === 'mono') return "'IBM Plex Mono', 'Courier New', monospace";
+  return "'DM Sans', Arial, Helvetica, sans-serif";
+}
 
 export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps> = ({
   file,
@@ -108,1266 +79,783 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
   onDownload,
 }) => {
   const isId = language === 'id';
+  const { openAuthModal, setPaywallOpen, setActiveProToolName } = useApp();
 
-  const [scanData, setScanData] = useState<ScanEditorResponse>(initialScan);
-  const [currentPage, setCurrentPage] = useState<number>(initialScan.pageIndex);
-  const [activeTool, setActiveTool] = useState<EditorTool>('select');
-  const [zoom, setZoom] = useState<number>(1.0);
-
-  // Active object typography state
-  const [activeObject, setActiveObject] = useState<fabric.FabricObject | null>(null);
-  const [activeFontFamily, setActiveFontFamily] = useState<string>("'Times New Roman', Times, serif");
-  const [activeFontSize, setActiveFontSize] = useState<number>(18);
-  const [activeTextColor, setActiveTextColor] = useState<string>('#111827');
-  const [currentPaperColor, setCurrentPaperColor] = useState<string>('#ffffff');
-  const [isBold, setIsBold] = useState<boolean>(false);
-  const [isItalic, setIsItalic] = useState<boolean>(false);
-  const [isUnderline, setIsUnderline] = useState<boolean>(false);
-  const [textAlign, setTextAlign] = useState<'left' | 'center' | 'right' | 'justify'>('left');
-
-  // Custom fonts & dropdown state
-  const [customFonts, setCustomFonts] = useState<FontOption[]>([]);
-  const [isFontDropdownOpen, setIsFontDropdownOpen] = useState<boolean>(false);
-  const [fontSearchQuery, setFontSearchQuery] = useState<string>('');
-
-  // Process & Loading states
-  const [isPageLoading, setIsPageLoading] = useState<boolean>(false);
-  const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [exportProgressText, setExportProgressText] = useState<string>('');
-
-  // DOM & Fabric refs
-  const canvasElementRef = useRef<HTMLCanvasElement>(null);
-  const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
-  const viewportContainerRef = useRef<HTMLDivElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
-  const fontFileInputRef = useRef<HTMLInputElement>(null);
-  const fontDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Whiteout drawing ref
-  const whiteoutDrawingRef = useRef<{
-    isDrawing: boolean;
-    startPointer: { x: number; y: number } | null;
-    activeRect: fabric.Rect | null;
-  }>({
-    isDrawing: false,
-    startPointer: null,
-    activeRect: null,
+  // Cache scanned pages so switching pages is instant
+  const [pagesCache, setPagesCache] = useState<Record<number, ScanEditorResponse>>({
+    [initialScan.pageIndex]: initialScan,
   });
+  const [currentPage, setCurrentPage] = useState<number>(initialScan.pageIndex);
+  const [isLoadingPage, setIsLoadingPage] = useState<boolean>(false);
 
-  // Base display scale so canvas fits viewport naturally
-  const baseDisplayScale = useMemo(() => {
-    if (!scanData.pixelWidth || !scanData.pageWidth) return 1.0;
-    // Scale standard 72pt page size with comfortable 1.35x display factor
-    return (scanData.pageWidth * 1.35) / scanData.pixelWidth;
-  }, [scanData.pageWidth, scanData.pixelWidth]);
+  // Map of `${pageIndex}:${blockId}` -> BlockEditState
+  const [editsMap, setEditsMap] = useState<Record<string, BlockEditState>>({});
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
 
-  // Combined font list
-  const allFonts = useMemo(() => {
-    return [...customFonts, ...GOOGLE_FONT_CATALOG];
-  }, [customFonts]);
+  // Viewport & UI states
+  const [zoom, setZoom] = useState<number>(100);
+  const [showOverlayBoxes, setShowOverlayBoxes] = useState<boolean>(true);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [isColdStartNotice, setIsColdStartNotice] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Filtered fonts based on search
-  const filteredFonts = useMemo(() => {
-    if (!fontSearchQuery.trim()) return allFonts;
-    const q = fontSearchQuery.toLowerCase();
-    return allFonts.filter(
-      (f) => f.label.toLowerCase().includes(q) || f.categoryLabel.toLowerCase().includes(q)
-    );
-  }, [allFonts, fontSearchQuery]);
+  const activeScan = pagesCache[currentPage] || initialScan;
+  const totalPages = activeScan.totalPages || 1;
 
-  // Preload 20+ Google Fonts dynamically into document head
+  // Show reassuring cold-start notice if export or page scan takes > 4s
   useEffect(() => {
-    const linkId = 'purepdf-editor-google-fonts';
-    if (!document.getElementById(linkId)) {
-      const link = document.createElement('link');
-      link.id = linkId;
-      link.rel = 'stylesheet';
-      link.href =
-        'https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&family=Barlow+Semi+Condensed:wght@400;600&family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=EB+Garamond:wght@400;600&family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600;700&family=Lato:wght@400;700&family=Lora:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,400;0,700;1,400&family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600;700&family=Oswald:wght@400;600&family=Pacifico&family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Poppins:wght@400;600;700&family=Roboto+Condensed:wght@400;700&family=Roboto+Slab:wght@400;700&family=Roboto:wght@400;500;700&family=Rokkitt:wght@400;700&family=Space+Mono:wght@400;700&display=swap';
-      document.head.appendChild(link);
+    if (!isExporting && !isLoadingPage) {
+      setIsColdStartNotice(false);
+      return;
     }
+    const timer = setTimeout(() => setIsColdStartNotice(true), 4000);
+    return () => clearTimeout(timer);
+  }, [isExporting, isLoadingPage]);
 
-    const handleClickOutside = (e: MouseEvent) => {
-      if (fontDropdownRef.current && !fontDropdownRef.current.contains(e.target as Node)) {
-        setIsFontDropdownOpen(false);
-      }
+  const makeKey = (pageIdx: number, blockId: string) => `${pageIdx}:${blockId}`;
+
+  const selectedBlock: ScanEditorBlock | null = useMemo(() => {
+    if (!selectedBlockId) return null;
+    return activeScan.blocks.find((b) => b.id === selectedBlockId) || null;
+  }, [activeScan.blocks, selectedBlockId]);
+
+  const selectedKey = selectedBlock ? makeKey(currentPage, selectedBlock.id) : null;
+  const selectedEdit: BlockEditState | null = selectedKey ? editsMap[selectedKey] || null : null;
+
+  const allEditsList = useMemo(() => Object.values(editsMap), [editsMap]);
+  const totalEditedCount = allEditsList.length;
+
+  const ensureEditState = (
+    block: ScanEditorBlock,
+    mode: 'erase' | 'replace' = 'replace'
+  ): BlockEditState => {
+    const key = makeKey(currentPage, block.id);
+    const existing = editsMap[key];
+    if (existing) {
+      return { ...existing, mode };
+    }
+    return {
+      pageIndex: currentPage,
+      blockId: block.id,
+      bbox: block.bbox,
+      originalText: block.text,
+      mode,
+      newText: block.text,
+      offsetX: 0,
+      offsetY: 0,
+      fontSize: Math.max(8, Math.min(72, Math.round(block.fontSize || 16))),
+      fontFamily: normalizeFontChoice(block.fontFamily, block.fontCategory),
+      isBold: Boolean(block.isBold),
+      textColor: block.textColor || '#1A1A1A',
+      autoTextColor: block.textColor || '#1A1A1A',
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // FABRIC CANVAS INITIALIZATION & HITBOX SETUP
-  // ─────────────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const canvasEl = canvasElementRef.current;
-    if (!canvasEl) return;
-
-    // Dispose old canvas if any
-    if (fabricCanvasRef.current) {
-      fabricCanvasRef.current.dispose();
-      fabricCanvasRef.current = null;
-    }
-
-    const totalScale = baseDisplayScale * zoom;
-    const canvasWidth = scanData.pixelWidth * totalScale;
-    const canvasHeight = scanData.pixelHeight * totalScale;
-
-    const fCanvas = new fabric.Canvas(canvasEl, {
-      width: canvasWidth,
-      height: canvasHeight,
-      selection: true,
-      preserveObjectStacking: true,
-      defaultCursor: 'default',
-    });
-    fCanvas.setZoom(totalScale);
-    fabricCanvasRef.current = fCanvas;
-
-    // Load high-resolution background scan image into Fabric.js (via scanData.image or pdfjs-dist)
-    let isCancelled = false;
-    const loadBackground = async () => {
-      let bgDataUrl = scanData.image;
-      if (!bgDataUrl && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
-        try {
-          const pdfjs = await getPdfJs();
-          if (pdfjs) {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdfDoc = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-            const page = await pdfDoc.getPage(currentPage + 1);
-            const viewport = page.getViewport({ scale: 2.0 });
-            const offscreenCanvas = document.createElement('canvas');
-            offscreenCanvas.width = viewport.width;
-            offscreenCanvas.height = viewport.height;
-            const ctx = offscreenCanvas.getContext('2d');
-            if (ctx) {
-              await page.render({ canvasContext: ctx, viewport }).promise;
-              bgDataUrl = offscreenCanvas.toDataURL('image/jpeg', 0.95);
-            }
-          }
-        } catch (e) {
-          console.warn('[pdfjs-dist background render]:', e);
-        }
-      }
-
-      if (isCancelled || !fCanvas || !bgDataUrl) return;
-      try {
-        const bgImg = await fabric.FabricImage.fromURL(bgDataUrl, { crossOrigin: 'anonymous' });
-        if (isCancelled || !fCanvas) return;
-        bgImg.set({
-          left: 0,
-          top: 0,
-          scaleX: scanData.pixelWidth / (bgImg.width || 1),
-          scaleY: scanData.pixelHeight / (bgImg.height || 1),
-          selectable: false,
-          evented: false,
-        });
-        fCanvas.backgroundImage = bgImg;
-        fCanvas.requestRenderAll();
-      } catch (err) {
-        console.error('[Fabric bg load error]:', err);
-      }
-    };
-    loadBackground();
-
-    // Sample dominant initial paper color from blocks
-    if (scanData.blocks && scanData.blocks.length > 0) {
-      const firstValidBg = scanData.blocks.find((b) => b.bgColor && b.bgColor !== '#ffffff')?.bgColor;
-      if (firstValidBg) setCurrentPaperColor(firstValidBg);
-    }
-
-    // Populate detected text blocks as transparent interactive hitboxes
-    scanData.blocks.forEach((block) => {
-      const bx = (block.bbox.x / 100.0) * scanData.pixelWidth;
-      const by = (block.bbox.y / 100.0) * scanData.pixelHeight;
-      const bw = (block.bbox.width / 100.0) * scanData.pixelWidth;
-      const bh = (block.bbox.height / 100.0) * scanData.pixelHeight;
-
-      const hitbox = new fabric.Rect({
-        left: bx,
-        top: by,
-        width: bw,
-        height: bh,
-        fill: 'transparent',
-        stroke: 'transparent',
-        strokeWidth: 1.5,
-        selectable: false,
-        hasControls: false,
-        hasBorders: false,
-        hoverCursor: 'text',
-      });
-
-      // Attach custom block metadata
-      (hitbox as any).__isHitbox = true;
-      (hitbox as any).__block = block;
-      (hitbox as any).__coords = { bx, by, bw, bh };
-
-      fCanvas.add(hitbox);
-    });
-
-    // ── HITBOX HOVER & CLICK-TO-EDIT HANDLERS ──
-    fCanvas.on('mouse:over', (opt) => {
-      const target = opt.target;
-      if (target && (target as any).__isHitbox && activeTool === 'select') {
-        target.set({
-          stroke: '#ff3700',
-          strokeDashArray: [4, 4],
-          fill: 'rgba(255, 55, 0, 0.08)',
-        });
-        fCanvas.requestRenderAll();
-      }
-    });
-
-    fCanvas.on('mouse:out', (opt) => {
-      const target = opt.target;
-      if (target && (target as any).__isHitbox) {
-        target.set({
-          stroke: 'transparent',
-          strokeDashArray: undefined,
-          fill: 'transparent',
-        });
-        fCanvas.requestRenderAll();
-      }
-    });
-
-    // Selection sync
-    fCanvas.on('selection:created', (e) => {
-      const sel = e.selected?.[0] || null;
-      updateToolbarFromSelection(sel);
-    });
-
-    fCanvas.on('selection:updated', (e) => {
-      const sel = e.selected?.[0] || null;
-      updateToolbarFromSelection(sel);
-    });
-
-    fCanvas.on('selection:cleared', () => {
-      setActiveObject(null);
-    });
-
-    fCanvas.requestRenderAll();
-
-    return () => {
-      isCancelled = true;
-      fCanvas.dispose();
-      fabricCanvasRef.current = null;
-    };
-  }, [scanData, baseDisplayScale]);
-
-  // Update zoom without recreating canvas
-  useEffect(() => {
-    const fCanvas = fabricCanvasRef.current;
-    if (!fCanvas) return;
-
-    const totalScale = baseDisplayScale * zoom;
-    const canvasWidth = scanData.pixelWidth * totalScale;
-    const canvasHeight = scanData.pixelHeight * totalScale;
-
-    fCanvas.setDimensions({ width: canvasWidth, height: canvasHeight });
-    fCanvas.setZoom(totalScale);
-    fCanvas.requestRenderAll();
-  }, [zoom, baseDisplayScale, scanData.pixelWidth, scanData.pixelHeight]);
-
-  // Sync toolbar controls from selected object
-  const updateToolbarFromSelection = (obj: fabric.FabricObject | null) => {
-    setActiveObject(obj);
-    if (!obj) return;
-
-    if (obj instanceof fabric.Textbox || (obj as any).text !== undefined) {
-      const tb = obj as fabric.Textbox;
-      if (tb.fontFamily) setActiveFontFamily(tb.fontFamily);
-      if (tb.fontSize) setActiveFontSize(Math.round(tb.fontSize));
-      if (tb.fill) setActiveTextColor(String(tb.fill));
-      setIsBold(tb.fontWeight === 'bold' || tb.fontWeight === 700);
-      setIsItalic(tb.fontStyle === 'italic');
-      setIsUnderline(Boolean(tb.underline));
-      if (tb.textAlign) setTextAlign(tb.textAlign as any);
-    } else if (obj instanceof fabric.Rect && (obj as any).__isWhiteout) {
-      if (obj.fill) setCurrentPaperColor(String(obj.fill));
-    }
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // MOUSE INTERACTION (HITBOX CLICK, WHITEOUT DRAWING, EYEDROPPER)
-  // ─────────────────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const fCanvas = fabricCanvasRef.current;
-    if (!fCanvas) return;
-
-    const handleMouseDown = (opt: any) => {
-      const pointer = fCanvas.getPointer(opt.e);
-
-      // 1. EYEDROPPER TOOL: Sample exact color under mouse cursor
-      if (activeTool === 'eyedropper') {
-        const sampledColor = sampleCanvasPixel(pointer.x, pointer.y);
-        if (sampledColor) {
-          setCurrentPaperColor(sampledColor);
-          if (activeObject && activeObject instanceof fabric.Rect) {
-            activeObject.set('fill', sampledColor);
-            fCanvas.requestRenderAll();
-          }
-        }
-        setActiveTool('select');
-        return;
-      }
-
-      // 2. WHITEOUT TOOL: Start drawing manual whiteout patch
-      if (activeTool === 'whiteout') {
-        whiteoutDrawingRef.current.isDrawing = true;
-        whiteoutDrawingRef.current.startPointer = { x: pointer.x, y: pointer.y };
-
-        const newRect = new fabric.Rect({
-          left: pointer.x,
-          top: pointer.y,
-          width: 0,
-          height: 0,
-          fill: currentPaperColor,
-          stroke: '#ff3700',
-          strokeWidth: 1,
-          strokeDashArray: [3, 3],
-          selectable: true,
-          cornerColor: '#ff3700',
-          cornerStrokeColor: '#ffffff',
-          borderColor: '#ff3700',
-          cornerSize: 8,
-          transparentCorners: false,
-        });
-        (newRect as any).__isWhiteout = true;
-        fCanvas.add(newRect);
-        whiteoutDrawingRef.current.activeRect = newRect;
-        return;
-      }
-
-      // 3. SELECT TOOL: If clicking an untouched hitbox, convert to editable text!
-      const target = opt.target;
-      if (activeTool === 'select' && target && (target as any).__isHitbox) {
-        const block = (target as any).__block as ScanEditorBlock;
-        const { bx, by, bw, bh } = (target as any).__coords;
-
-        // Remove the hitbox element
-        fCanvas.remove(target);
-
-        // A. Natural paper background patch (STRICT 0px vertical bleed)
-        const patchFill = block.bgColor || currentPaperColor || '#fbfaf8';
-        const patch = new fabric.Rect({
-          left: bx,
-          top: by,
-          width: bw,
-          height: bh,
-          fill: patchFill,
-          selectable: false,
-          evented: false,
-        });
-        (patch as any).__isPatchFor = block.id;
-        fCanvas.add(patch);
-
-        // B. Calibrate font size (0.78 * tight ink height)
-        const calibratedFontPx = Math.max(10, Math.round(0.78 * bh));
-
-        // C. Create editable Textbox with 8-point handles
-        const textbox = new fabric.Textbox(block.text, {
-          left: bx,
-          top: by,
-          width: Math.max(bw, 60),
-          fontSize: calibratedFontPx,
-          fontFamily: block.fontFamily || "'Times New Roman', Times, serif",
-          fill: block.textColor || '#111827',
-          fontWeight: block.fontWeight || (block.isBold ? 700 : 400),
-          fontStyle: block.fontStyle || 'normal',
-          underline: Boolean(block.isUnderline),
-          textAlign: 'left',
-          lineHeight: 1.15,
-          splitByGrapheme: false,
-          editable: true,
-          hasControls: true,
-          cornerColor: '#ff3700',
-          cornerStrokeColor: '#ffffff',
-          borderColor: '#ff3700',
-          cornerSize: 8,
-          transparentCorners: false,
-        });
-        (textbox as any).__isEditedText = true;
-        (textbox as any).__blockId = block.id;
-        (textbox as any).__patch = patch;
-
-        fCanvas.add(textbox);
-        fCanvas.setActiveObject(textbox);
-        textbox.enterEditing();
-        textbox.selectAll();
-        fCanvas.requestRenderAll();
-
-        updateToolbarFromSelection(textbox);
-      }
-    };
-
-    const handleMouseMove = (opt: any) => {
-      if (activeTool === 'whiteout' && whiteoutDrawingRef.current.isDrawing) {
-        const pointer = fCanvas.getPointer(opt.e);
-        const start = whiteoutDrawingRef.current.startPointer;
-        const rect = whiteoutDrawingRef.current.activeRect;
-        if (!start || !rect) return;
-
-        const left = Math.min(start.x, pointer.x);
-        const top = Math.min(start.y, pointer.y);
-        const width = Math.abs(pointer.x - start.x);
-        const height = Math.abs(pointer.y - start.y);
-
-        rect.set({ left, top, width, height });
-        fCanvas.requestRenderAll();
-      }
-    };
-
-    const handleMouseUp = () => {
-      if (activeTool === 'whiteout' && whiteoutDrawingRef.current.isDrawing) {
-        whiteoutDrawingRef.current.isDrawing = false;
-        const rect = whiteoutDrawingRef.current.activeRect;
-        if (rect) {
-          if (rect.width && rect.width > 3 && rect.height && rect.height > 3) {
-            rect.set({ stroke: 'transparent', strokeDashArray: undefined });
-            fCanvas.setActiveObject(rect);
-          } else {
-            fCanvas.remove(rect);
-          }
-        }
-        whiteoutDrawingRef.current.startPointer = null;
-        whiteoutDrawingRef.current.activeRect = null;
-        setActiveTool('select');
-        fCanvas.requestRenderAll();
-      }
-    };
-
-    fCanvas.on('mouse:down', handleMouseDown);
-    fCanvas.on('mouse:move', handleMouseMove);
-    fCanvas.on('mouse:up', handleMouseUp);
-
-    return () => {
-      fCanvas.off('mouse:down', handleMouseDown);
-      fCanvas.off('mouse:move', handleMouseMove);
-      fCanvas.off('mouse:up', handleMouseUp);
-    };
-  }, [activeTool, currentPaperColor, activeObject]);
-
-  // Sample pixel color from background image / canvas
-  const sampleCanvasPixel = (x: number, y: number): string | null => {
-    const fCanvas = fabricCanvasRef.current;
-    if (!fCanvas) return null;
-    const ctx = fCanvas.getContext();
-    if (!ctx) return null;
-
-    try {
-      const zoomLevel = fCanvas.getZoom();
-      const px = Math.round(x * zoomLevel);
-      const py = Math.round(y * zoomLevel);
-      const pixel = ctx.getImageData(px, py, 1, 1).data;
-      const r = pixel[0].toString(16).padStart(2, '0');
-      const g = pixel[1].toString(16).padStart(2, '0');
-      const b = pixel[2].toString(16).padStart(2, '0');
-      return `#${r}${g}${b}`;
-    } catch {
-      return null;
-    }
+  const handleSelectBlock = (block: ScanEditorBlock) => {
+    setSelectedBlockId(block.id);
+    setErrorMsg(null);
   };
 
-  // Trigger EyeDropper API if supported or activate canvas sampler
-  const handleOpenEyeDropper = async () => {
-    if (typeof window !== 'undefined' && 'EyeDropper' in window) {
-      try {
-        const eyeDropper = new (window as any).EyeDropper();
-        const result = await eyeDropper.open();
-        if (result && result.sRGBHex) {
-          setCurrentPaperColor(result.sRGBHex);
-          if (activeObject && activeObject instanceof fabric.Rect) {
-            activeObject.set('fill', result.sRGBHex);
-            fabricCanvasRef.current?.requestRenderAll();
-          }
-          return;
-        }
-      } catch (err: any) {
-        // User cancelled eye dropper, no action needed
-        if (err.name === 'AbortError') return;
-      }
-    }
-    // Fallback: activate canvas click eyedropper mode
-    setActiveTool('eyedropper');
-  };
-
-  // Add new standalone text box
-  const handleAddNewTextBox = () => {
-    const fCanvas = fabricCanvasRef.current;
-    if (!fCanvas) return;
-
-    const centerX = scanData.pixelWidth * 0.35;
-    const centerY = scanData.pixelHeight * 0.35;
-
-    const tb = new fabric.Textbox(isId ? 'Teks Baru' : 'New Text', {
-      left: centerX,
-      top: centerY,
-      width: 250,
-      fontSize: 22,
-      fontFamily: activeFontFamily,
-      fill: activeTextColor,
-      fontWeight: isBold ? 700 : 400,
-      fontStyle: isItalic ? 'italic' : 'normal',
-      underline: isUnderline,
-      textAlign: textAlign,
-      lineHeight: 1.15,
-      splitByGrapheme: false,
-      editable: true,
-      cornerColor: '#ff3700',
-      cornerStrokeColor: '#ffffff',
-      borderColor: '#ff3700',
-      cornerSize: 8,
-      transparentCorners: false,
-    });
-
-    fCanvas.add(tb);
-    fCanvas.setActiveObject(tb);
-    tb.enterEditing();
-    tb.selectAll();
-    fCanvas.requestRenderAll();
-    updateToolbarFromSelection(tb);
-  };
-
-  // Delete / Erase active object
-  const handleDeleteActiveObject = () => {
-    const fCanvas = fabricCanvasRef.current;
-    if (!fCanvas || !activeObject) return;
-
-    // If it's an edited text, we remove the text, BUT KEEP the patch underneath so old text is erased!
-    fCanvas.remove(activeObject);
-    fCanvas.discardActiveObject();
-    setActiveObject(null);
-    fCanvas.requestRenderAll();
-  };
-
-  // Insert signature or picture
-  const handleInsertImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const uploadedFile = e.target.files?.[0];
-    if (!uploadedFile) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const dataUrl = event.target?.result as string;
-      const fCanvas = fabricCanvasRef.current;
-      if (!fCanvas) return;
-
-      const img = await fabric.FabricImage.fromURL(dataUrl);
-      img.set({
-        left: scanData.pixelWidth * 0.4,
-        top: scanData.pixelHeight * 0.4,
-        scaleX: Math.min(1.0, 300 / (img.width || 1)),
-        scaleY: Math.min(1.0, 300 / (img.width || 1)),
-        cornerColor: '#ff3700',
-        cornerStrokeColor: '#ffffff',
-        borderColor: '#ff3700',
-        cornerSize: 8,
-        transparentCorners: false,
-      });
-
-      fCanvas.add(img);
-      fCanvas.setActiveObject(img);
-      fCanvas.requestRenderAll();
-      updateToolbarFromSelection(img);
-    };
-    reader.readAsDataURL(uploadedFile);
-
-    if (imageInputRef.current) imageInputRef.current.value = '';
-  };
-
-  // Handle Custom Font Upload (.ttf / .otf / .woff / .woff2)
-  const handleCustomFontUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const uploadedFile = e.target.files?.[0];
-    if (!uploadedFile) return;
-
-    try {
-      const cleanName = uploadedFile.name
-        .replace(/\.[^/.]+$/, '')
-        .replace(/[^a-zA-Z0-9_\-\s]/g, '')
-        .trim() || 'CustomFont';
-
-      const buffer = await uploadedFile.arrayBuffer();
-      const fontFace = new FontFace(cleanName, buffer);
-      await fontFace.load();
-      document.fonts.add(fontFace);
-
-      const newOption: FontOption = {
-        label: `${cleanName} (Uploaded)`,
-        value: `'${cleanName}', sans-serif`,
-        category: 'custom',
-        categoryLabel: isId ? 'Font Khusus (Upload)' : 'Custom Uploaded Fonts',
-        isCustom: true,
+  const updateSelectedEdit = (patch: Partial<BlockEditState>) => {
+    if (!selectedBlock) return;
+    const key = makeKey(currentPage, selectedBlock.id);
+    setEditsMap((prev) => {
+      const base = prev[key] || ensureEditState(selectedBlock, patch.mode || 'replace');
+      return {
+        ...prev,
+        [key]: { ...base, ...patch },
       };
-
-      setCustomFonts((prev) => [newOption, ...prev]);
-      handleApplyFont(newOption.value);
-      setIsFontDropdownOpen(false);
-
-      if (fontFileInputRef.current) fontFileInputRef.current.value = '';
-    } catch (err: any) {
-      alert(isId ? `Gagal memuat font: ${err.message}` : `Failed to load font: ${err.message}`);
-    }
-  };
-
-  // Apply typography updates to active text
-  const handleApplyFont = (fontVal: string) => {
-    setActiveFontFamily(fontVal);
-    if (activeObject && (activeObject instanceof fabric.Textbox || (activeObject as any).text !== undefined)) {
-      activeObject.set('fontFamily', fontVal);
-      fabricCanvasRef.current?.requestRenderAll();
-    }
-  };
-
-  const handleApplyFontSize = (newSize: number) => {
-    const clamped = Math.max(6, Math.min(140, newSize));
-    setActiveFontSize(clamped);
-    if (activeObject && (activeObject instanceof fabric.Textbox || (activeObject as any).text !== undefined)) {
-      activeObject.set('fontSize', clamped);
-      fabricCanvasRef.current?.requestRenderAll();
-    }
-  };
-
-  const handleToggleBold = () => {
-    const nextBold = !isBold;
-    setIsBold(nextBold);
-    if (activeObject && (activeObject instanceof fabric.Textbox || (activeObject as any).text !== undefined)) {
-      activeObject.set('fontWeight', nextBold ? 700 : 400);
-      fabricCanvasRef.current?.requestRenderAll();
-    }
-  };
-
-  const handleToggleItalic = () => {
-    const nextItalic = !isItalic;
-    setIsItalic(nextItalic);
-    if (activeObject && (activeObject instanceof fabric.Textbox || (activeObject as any).text !== undefined)) {
-      activeObject.set('fontStyle', nextItalic ? 'italic' : 'normal');
-      fabricCanvasRef.current?.requestRenderAll();
-    }
-  };
-
-  const handleToggleUnderline = () => {
-    const nextUnderline = !isUnderline;
-    setIsUnderline(nextUnderline);
-    if (activeObject && (activeObject instanceof fabric.Textbox || (activeObject as any).text !== undefined)) {
-      activeObject.set('underline', nextUnderline);
-      fabricCanvasRef.current?.requestRenderAll();
-    }
-  };
-
-  const handleApplyTextAlign = (align: 'left' | 'center' | 'right' | 'justify') => {
-    setTextAlign(align);
-    if (activeObject && (activeObject instanceof fabric.Textbox || (activeObject as any).text !== undefined)) {
-      activeObject.set('textAlign', align);
-      fabricCanvasRef.current?.requestRenderAll();
-    }
-  };
-
-  const handleApplyTextColor = (hex: string) => {
-    setActiveTextColor(hex);
-    if (activeObject && (activeObject instanceof fabric.Textbox || (activeObject as any).text !== undefined)) {
-      activeObject.set('fill', hex);
-      fabricCanvasRef.current?.requestRenderAll();
-    }
-  };
-
-  const handleApplyPaperColor = (hex: string) => {
-    setCurrentPaperColor(hex);
-    if (activeObject && activeObject instanceof fabric.Rect) {
-      activeObject.set('fill', hex);
-      fabricCanvasRef.current?.requestRenderAll();
-    }
-  };
-
-  // Fine-nudge active object (1px precision)
-  const handleNudgeObject = useCallback((dx: number, dy: number) => {
-    const fCanvas = fabricCanvasRef.current;
-    if (!fCanvas || !activeObject) return;
-
-    activeObject.set({
-      left: (activeObject.left || 0) + dx,
-      top: (activeObject.top || 0) + dy,
     });
-    activeObject.setCoords();
-    fCanvas.requestRenderAll();
-  }, [activeObject]);
+  };
 
-  // Keyboard navigation & fine-nudge
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!activeObject) return;
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        // If typing inside an editing textbox without Alt/Shift, let cursor move
-        if (activeObject instanceof fabric.Textbox && (activeObject as any).isEditing && !e.altKey) {
-          return;
-        }
+  const handleResetSelectedBlock = () => {
+    if (!selectedBlock) return;
+    const key = makeKey(currentPage, selectedBlock.id);
+    setEditsMap((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
-        e.preventDefault();
-        const step = e.shiftKey ? 5 : 1;
-        let dx = 0;
-        let dy = 0;
-        if (e.key === 'ArrowLeft') dx = -step;
-        if (e.key === 'ArrowRight') dx = step;
-        if (e.key === 'ArrowUp') dy = -step;
-        if (e.key === 'ArrowDown') dy = step;
+  const handleResetAll = () => {
+    setEditsMap({});
+    setSelectedBlockId(null);
+    setErrorMsg(null);
+  };
 
-        handleNudgeObject(dx, dy);
-      }
-    };
+  const handleSwitchPage = async (targetPage: number) => {
+    if (targetPage < 0 || targetPage >= totalPages || targetPage === currentPage || isLoadingPage) {
+      return;
+    }
+    setSelectedBlockId(null);
+    setErrorMsg(null);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeObject, handleNudgeObject]);
+    if (pagesCache[targetPage]) {
+      setCurrentPage(targetPage);
+      return;
+    }
 
-  // Handle changing document page (multi-page documents)
-  const handleChangePage = async (newPageIndex: number) => {
-    if (newPageIndex < 0 || newPageIndex >= scanData.totalPages || isPageLoading) return;
-
-    setIsPageLoading(true);
-    setActiveObject(null);
-
+    setIsLoadingPage(true);
     try {
-      const freshScan = await apiScanEditor(file, newPageIndex);
-      setScanData(freshScan);
-      setCurrentPage(newPageIndex);
+      const scanRes = await apiScanEditor(file, targetPage);
+      setPagesCache((prev) => ({ ...prev, [targetPage]: scanRes }));
+      setCurrentPage(targetPage);
     } catch (err: any) {
-      alert(isId ? `Gagal memuat halaman: ${err.message}` : `Failed to load page: ${err.message}`);
+      if (err?.status === 401) {
+        openAuthModal('login');
+        setErrorMsg(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+      } else {
+        setErrorMsg(
+          isId
+            ? 'Gagal memuat halaman berikutnya. Coba beberapa detik lagi.'
+            : 'Failed to scan the next page. Please try again in a few seconds.'
+        );
+      }
     } finally {
-      setIsPageLoading(false);
+      setIsLoadingPage(false);
     }
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // SAVE & DOWNLOAD PDF PIPELINE (Export direct from Fabric.js canvas)
-  // ─────────────────────────────────────────────────────────────────────────────
-  const handleSaveAndDownload = async () => {
-    const fCanvas = fabricCanvasRef.current;
-    if (!fCanvas) return;
+  const handleApplyAndExport = async () => {
+    if (totalEditedCount === 0) {
+      setErrorMsg(
+        isId
+          ? 'Klik minimal satu kotak teks untuk dihapus (Erase) atau diganti (Replace) terlebih dahulu.'
+          : 'Click at least one text box to Erase or Replace before exporting.'
+      );
+      return;
+    }
 
     setIsExporting(true);
-    setExportProgressText(isId ? 'Mempersiapkan perenderan dokumen...' : 'Preparing document rendering...');
+    setErrorMsg(null);
+
+    const payload: ScanEditItem[] = allEditsList.map((item) => ({
+      pageIndex: item.pageIndex,
+      blockId: item.blockId,
+      bbox: item.bbox,
+      mode: item.mode,
+      newText: item.mode === 'replace' ? item.newText : '',
+      offsetX: item.offsetX,
+      offsetY: item.offsetY,
+      fontSize: item.fontSize,
+      fontFamily: item.fontFamily,
+      isBold: item.isBold,
+      textColor: item.textColor,
+    }));
 
     try {
-      // 1. Unselect all objects so selection outlines are hidden during export
-      fCanvas.discardActiveObject();
-
-      // 2. Temporarily hide all untouched transparent hitboxes
-      const hitboxes: fabric.FabricObject[] = [];
-      fCanvas.getObjects().forEach((obj) => {
-        if ((obj as any).__isHitbox) {
-          obj.set('visible', false);
-          hitboxes.push(obj);
-        }
-      });
-      fCanvas.requestRenderAll();
-
-      setExportProgressText(isId ? 'Mengekspor kanvas resolusi penuh...' : 'Exporting full-resolution canvas...');
-
-      // 3. Export at 1:1 native resolution (multiplier = 1 / currentZoom)
-      const currentZoom = fCanvas.getZoom();
-      const exportMultiplier = 1 / (currentZoom || 1);
-
-      const highResDataUrl = fCanvas.toDataURL({
-        format: 'jpeg',
-        quality: 0.96,
-        multiplier: exportMultiplier,
-      });
-
-      // 4. Restore hitboxes
-      hitboxes.forEach((h) => h.set('visible', true));
-      fCanvas.requestRenderAll();
-
-      // Convert DataURL to binary
-      const res = await fetch(highResDataUrl);
-      const pageJpegBytes = await res.arrayBuffer();
-
-      setExportProgressText(isId ? 'Mengemas dokumen ke PDF...' : 'Packaging document to PDF...');
-
-      let finalPdfDoc: PDFDocument;
-      const fileBytes = await file.arrayBuffer();
-      const isOriginalPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-
-      if (isOriginalPdf) {
-        finalPdfDoc = await PDFDocument.load(fileBytes);
-        const embeddedJpeg = await finalPdfDoc.embedJpg(pageJpegBytes);
-        const targetPage = finalPdfDoc.getPage(currentPage);
-        const { width, height } = targetPage.getSize();
-
-        // Draw image directly onto page at exact dimensions
-        targetPage.drawImage(embeddedJpeg, {
-          x: 0,
-          y: 0,
-          width,
-          height,
-        });
-      } else {
-        finalPdfDoc = await PDFDocument.create();
-        const embeddedJpeg = await finalPdfDoc.embedJpg(pageJpegBytes);
-        const newPage = finalPdfDoc.addPage([scanData.pageWidth, scanData.pageHeight]);
-        newPage.drawImage(embeddedJpeg, {
-          x: 0,
-          y: 0,
-          width: scanData.pageWidth,
-          height: scanData.pageHeight,
-        });
-      }
-
-      const pdfBytes = await finalPdfDoc.save();
-      const outputBlob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+      const blob = await apiApplyScanEdits(file, payload);
       const baseName = file.name.replace(/\.[^/.]+$/, '');
-      const outFileName = `${baseName}_edited.pdf`;
-
-      onDownload(outputBlob, outFileName);
+      onDownload(blob, `${baseName}_ai_edited.pdf`);
     } catch (err: any) {
-      console.error('[Save & Download PDF Error]:', err);
-      alert(isId ? `Gagal mengekspor PDF: ${err.message}` : `Failed to export PDF: ${err.message}`);
+      if (err?.status === 401) {
+        openAuthModal('login');
+        setErrorMsg(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+      } else if (err?.status === 402) {
+        setActiveProToolName(isId ? 'AI Edit PDF Scan & Screenshot' : 'AI Edit Scanned & Screenshot PDF');
+        setPaywallOpen(true);
+        setErrorMsg(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
+      } else if (err?.status === 413) {
+        setErrorMsg(err.message);
+      } else {
+        setErrorMsg(
+          isId
+            ? 'Server AI sedang sibuk atau bangun dari mode tidur. Mohon coba beberapa detik lagi.'
+            : 'The AI server is waking up or busy. Please try again in a few seconds.'
+        );
+      }
     } finally {
       setIsExporting(false);
-      setExportProgressText('');
     }
   };
 
-  const isTextSelected = activeObject instanceof fabric.Textbox || (activeObject && (activeObject as any).text !== undefined);
+  // Current inspector values (either active edit or detected block defaults)
+  const inspectorMode: 'none' | 'erase' | 'replace' = selectedEdit ? selectedEdit.mode : 'none';
+  const inspectorText = selectedEdit ? selectedEdit.newText : selectedBlock?.text || '';
+  const inspectorOffsetX = selectedEdit ? selectedEdit.offsetX : 0;
+  const inspectorOffsetY = selectedEdit ? selectedEdit.offsetY : 0;
+  const inspectorFontSize = selectedEdit
+    ? selectedEdit.fontSize
+    : Math.max(8, Math.min(72, Math.round(selectedBlock?.fontSize || 16)));
+  const inspectorFontFamily: FontFamilyChoice = selectedEdit
+    ? selectedEdit.fontFamily
+    : normalizeFontChoice(selectedBlock?.fontFamily, selectedBlock?.fontCategory);
+  const inspectorIsBold = selectedEdit ? selectedEdit.isBold : Boolean(selectedBlock?.isBold);
+  const inspectorColor = selectedEdit ? selectedEdit.textColor : selectedBlock?.textColor || '#1A1A1A';
 
   return (
-    <div className="w-full flex flex-col bg-neutral-950 text-white rounded-2xl border border-neutral-800 shadow-2xl overflow-hidden transition-all my-4">
-      
-      {/* Hidden File Inputs */}
-      <input
-        type="file"
-        ref={imageInputRef}
-        onChange={handleInsertImage}
-        accept="image/png, image/jpeg, image/webp"
-        className="hidden"
-      />
-      <input
-        type="file"
-        ref={fontFileInputRef}
-        onChange={handleCustomFontUpload}
-        accept=".ttf,.otf,.woff,.woff2"
-        className="hidden"
-      />
-
-      {/* 1. TOP HEADER TOOLBAR */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-neutral-900 border-b border-neutral-800">
-        
-        {/* Left: Back & Metadata */}
-        <div className="flex items-center gap-3">
-          <Button
-            size="sm"
-            variant="ghost"
+    <div className="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] overflow-hidden shadow-card-elevated">
+      {/* Top Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
             onClick={onClose}
-            className="text-neutral-400 hover:text-white hover:bg-neutral-800 px-2.5 h-8 gap-1.5"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] text-xs font-medium text-[var(--color-text)] hover:border-[var(--color-border-strong)] transition-colors"
           >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="text-xs font-medium">{isId ? 'Kembali' : 'Back'}</span>
-          </Button>
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>{isId ? 'Ganti File' : 'Change File'}</span>
+          </button>
 
-          <div className="h-4 w-px bg-neutral-700 hidden sm:block" />
-
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-xs tracking-wide text-white truncate max-w-[180px] sm:max-w-[260px]">
-              {file.name}
-            </span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#ff3700]/15 text-[#ff3700] border border-[#ff3700]/30 font-bold">
-              AI Canvas
-            </span>
+          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-[var(--color-accent)]/10 border border-[var(--color-accent)]/25 text-[11px] font-mono font-semibold text-[var(--color-accent)]">
+            <Sparkles className="w-3 h-3" />
+            <span>OpenCV Inpaint + OCR</span>
           </div>
         </div>
 
-        {/* Center: Page Controls & Zoom */}
+        {/* Page Navigation & Zoom */}
         <div className="flex items-center gap-2">
-          {scanData.totalPages > 1 && (
-            <div className="flex items-center bg-neutral-800 border border-neutral-700 rounded-lg p-0.5 text-xs">
+          {totalPages > 1 && (
+            <div className="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1">
               <button
-                onClick={() => handleChangePage(currentPage - 1)}
-                disabled={currentPage === 0 || isPageLoading}
-                className="p-1 hover:text-white disabled:opacity-30 disabled:hover:text-neutral-400"
-                title={isId ? 'Halaman Sebelumnya' : 'Previous Page'}
+                type="button"
+                disabled={currentPage <= 0 || isLoadingPage}
+                onClick={() => handleSwitchPage(currentPage - 1)}
+                className="p-1 rounded-sm text-[var(--color-text)] hover:bg-[var(--color-bg)] disabled:opacity-35"
+                aria-label="Previous page"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-3.5 h-3.5" />
               </button>
-              <span className="px-2 font-mono text-[11px] text-neutral-300">
-                {currentPage + 1} / {scanData.totalPages}
+              <span className="font-mono text-[11px] font-semibold px-1.5 text-[var(--color-text)]">
+                {currentPage + 1} / {totalPages}
               </span>
               <button
-                onClick={() => handleChangePage(currentPage + 1)}
-                disabled={currentPage >= scanData.totalPages - 1 || isPageLoading}
-                className="p-1 hover:text-white disabled:opacity-30 disabled:hover:text-neutral-400"
-                title={isId ? 'Halaman Berikutnya' : 'Next Page'}
+                type="button"
+                disabled={currentPage >= totalPages - 1 || isLoadingPage}
+                onClick={() => handleSwitchPage(currentPage + 1)}
+                className="p-1 rounded-sm text-[var(--color-text)] hover:bg-[var(--color-bg)] disabled:opacity-35"
+                aria-label="Next page"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
           )}
 
-          {/* Zoom controls */}
-          <div className="flex items-center bg-neutral-800 border border-neutral-700 rounded-lg p-0.5 text-xs">
+          <div className="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1">
             <button
-              onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.15) * 100) / 100))}
-              className="p-1 hover:text-white text-neutral-400"
-              title="Zoom Out"
+              type="button"
+              onClick={() => setZoom((z) => Math.max(60, z - 15))}
+              className="p-1 rounded-sm text-[var(--color-text)] hover:bg-[var(--color-bg)]"
+              aria-label="Zoom out"
             >
-              <ZoomOut className="w-4 h-4" />
+              <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="px-1.5 font-mono text-[11px] text-neutral-300 min-w-[38px] text-center">
-              {Math.round(zoom * 100)}%
+            <span className="font-mono text-[11px] font-semibold w-10 text-center text-[var(--color-text)]">
+              {zoom}%
             </span>
             <button
-              onClick={() => setZoom((z) => Math.min(2.5, Math.round((z + 0.15) * 100) / 100))}
-              className="p-1 hover:text-white text-neutral-400"
-              title="Zoom In"
+              type="button"
+              onClick={() => setZoom((z) => Math.min(180, z + 15))}
+              className="p-1 rounded-sm text-[var(--color-text)] hover:bg-[var(--color-bg)]"
+              aria-label="Zoom in"
             >
-              <ZoomIn className="w-4 h-4" />
+              <ZoomIn className="w-3.5 h-3.5" />
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowOverlayBoxes((v) => !v)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] text-xs font-medium text-[var(--color-text)] hover:border-[var(--color-border-strong)]"
+            title={isId ? 'Tampilkan / Sembunyikan Kotak Deteksi' : 'Toggle Detected Text Boxes'}
+          >
+            {showOverlayBoxes ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            <span className="hidden md:inline">{isId ? 'Kotak Teks' : 'Boxes'}</span>
+          </button>
         </div>
 
-        {/* Right: Actions */}
+        {/* Export CTA */}
         <div className="flex items-center gap-2">
+          {totalEditedCount > 0 && (
+            <button
+              type="button"
+              onClick={handleResetAll}
+              disabled={isExporting}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-sm text-xs font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>{isId ? 'Reset' : 'Reset'} ({totalEditedCount})</span>
+            </button>
+          )}
+
           <Button
+            type="button"
+            variant="primary"
             size="sm"
-            variant="accent"
-            onClick={handleSaveAndDownload}
-            disabled={isExporting}
-            className="!h-8 px-4 rounded-full font-bold shadow-[0px_2px_12px_rgba(255,55,0,0.4)]"
+            disabled={isExporting || totalEditedCount === 0}
+            onClick={handleApplyAndExport}
+            className="gap-1.5"
           >
             {isExporting ? (
-              <span className="flex items-center gap-2">
+              <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>{exportProgressText || (isId ? 'Merender PDF...' : 'Rendering PDF...')}</span>
-              </span>
+                <span>{isId ? 'Memproses Inpainting...' : 'Inpainting & Exporting...'}</span>
+              </>
             ) : (
-              <span className="flex items-center gap-1.5">
+              <>
                 <Download className="w-3.5 h-3.5" />
-                <span>{isId ? 'Simpan & Unduh' : 'Save & Download'}</span>
-              </span>
+                <span>
+                  {isId ? 'Terapkan & Export PDF' : 'Apply & Export PDF'}
+                  {totalEditedCount > 0 ? ` (${totalEditedCount})` : ''}
+                </span>
+              </>
             )}
           </Button>
         </div>
-
       </div>
 
-      {/* 2. MAIN TOOLBAR (Tools, Typography, Whiteout, Eyedropper) */}
-      <div className="flex flex-wrap items-center gap-2.5 px-4 py-2 bg-neutral-900/95 border-b border-neutral-800 text-xs relative z-40">
-        
-        {/* Tool selector buttons */}
-        <div className="flex items-center gap-1 bg-neutral-800/80 p-0.5 rounded-lg border border-neutral-700">
-          <button
-            onClick={() => setActiveTool('select')}
-            className={`flex items-center gap-1 px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${
-              activeTool === 'select'
-                ? 'bg-[#ff3700] text-white shadow-xs'
-                : 'text-neutral-300 hover:text-white hover:bg-neutral-700'
-            }`}
-            title="Kursor Seleksi / Klik Teks Asli untuk Mengedit"
-          >
-            <MousePointer className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Pilih</span>
-          </button>
-
-          <button
-            onClick={handleAddNewTextBox}
-            className="flex items-center gap-1 px-2.5 h-7 rounded-md text-xs font-medium text-neutral-300 hover:text-white hover:bg-neutral-700 transition-colors"
-            title="Tambah Kotak Teks Baru"
-          >
-            <Plus className="w-3.5 h-3.5 text-[#ff3700]" />
-            <span className="hidden sm:inline">{isId ? 'Teks' : 'Text'}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTool(activeTool === 'whiteout' ? 'select' : 'whiteout')}
-            className={`flex items-center gap-1 px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${
-              activeTool === 'whiteout'
-                ? 'bg-amber-600 text-white shadow-xs'
-                : 'text-neutral-300 hover:text-white hover:bg-neutral-700'
-            }`}
-            title="Kotak Penutup / Whiteout Kertas Manual (Tarik kotak di atas tulisan lama)"
-          >
-            <Square className="w-3.5 h-3.5 text-amber-300" />
-            <span className="hidden sm:inline">Whiteout</span>
-          </button>
-
-          <button
-            onClick={handleOpenEyeDropper}
-            className={`flex items-center gap-1 px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${
-              activeTool === 'eyedropper'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-neutral-300 hover:text-white hover:bg-neutral-700'
-            }`}
-            title="Pipet Warna Kertas / Teks (Ambil sampel warna dari kanvas)"
-          >
-            <Pipette className="w-3.5 h-3.5 text-blue-300" />
-            <span className="hidden sm:inline">{isId ? 'Pipet' : 'Eyedropper'}</span>
-          </button>
-
-          <button
-            onClick={() => imageInputRef.current?.click()}
-            className="flex items-center gap-1 px-2.5 h-7 rounded-md text-xs font-medium text-neutral-300 hover:text-white hover:bg-neutral-700 transition-colors"
-            title="Sisipkan Gambar atau Tanda Tangan"
-          >
-            <ImageIcon className="w-3.5 h-3.5 text-purple-300" />
-            <span className="hidden md:inline">{isId ? 'Gambar' : 'Image'}</span>
-          </button>
+      {/* Cold-start or Error Banner */}
+      {isColdStartNotice && (isExporting || isLoadingPage) && (
+        <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+          <span>
+            {isId
+              ? 'Server AI sedang memproses OpenCV inpainting / bangun dari mode tidur (~20–45 detik). Mohon tunggu sebentar...'
+              : 'AI server is running OpenCV inpainting or waking from cold start (~20–45s). Please wait...'}
+          </span>
         </div>
+      )}
 
-        <div className="h-5 w-px bg-neutral-700 hidden sm:block" />
+      {errorMsg && (
+        <div className="px-4 py-2.5 bg-red-50 border-b border-red-200 text-red-700 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
 
-        {/* FONT FAMILY DROPDOWN WITH LIVE PREVIEW & 20+ GOOGLE FONTS */}
-        <div className="relative" ref={fontDropdownRef}>
-          <button
-            onClick={() => setIsFontDropdownOpen((prev) => !prev)}
-            className="h-8 px-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-xs text-white hover:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-[#ff3700] flex items-center gap-2 min-w-[150px] justify-between"
-            title="Pilih Jenis Huruf (Font)"
-          >
-            <span
-              className="truncate max-w-[120px] text-left"
-              style={{ fontFamily: activeFontFamily }}
+      {/* Main Split Workspace */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[560px]">
+        {/* Left/Center: Interactive Scanned Document Canvas */}
+        <div className="lg:col-span-8 bg-[#EAE8E3] p-4 sm:p-6 overflow-auto max-h-[75vh] flex items-start justify-center relative">
+          {isLoadingPage ? (
+            <div className="flex flex-col items-center justify-center py-24 gap-3 text-[var(--color-text-muted)]">
+              <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent)]" />
+              <p className="text-xs font-mono uppercase tracking-wider">
+                {isId ? 'Memindai halaman via OCR...' : 'Scanning page via OCR...'}
+              </p>
+            </div>
+          ) : (
+            <div
+              className="relative shadow-[0_12px_36px_rgba(17,17,16,0.18)] border border-black/15 bg-white select-none transition-all duration-150"
+              style={{
+                width: `${zoom}%`,
+                maxWidth: zoom <= 100 ? '760px' : 'none',
+                minWidth: '320px',
+              }}
             >
-              {allFonts.find((f) => f.value === activeFontFamily)?.label ||
-                activeFontFamily.split(',')[0].replace(/['"]/g, '')}
-            </span>
-            <ChevronDown className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
-          </button>
+              {/* Underlying Scanned Page Image */}
+              <img
+                src={activeScan.image}
+                alt={`Scanned page ${currentPage + 1}`}
+                className="w-full h-auto block pointer-events-none"
+                draggable={false}
+              />
 
-          {isFontDropdownOpen && (
-            <div className="absolute left-0 top-9 w-64 max-h-80 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col">
-              <div className="p-2 border-b border-neutral-800 flex items-center gap-1.5 bg-neutral-950/70">
-                <Search className="w-3.5 h-3.5 text-neutral-400 shrink-0 ml-1" />
-                <input
-                  type="text"
-                  value={fontSearchQuery}
-                  onChange={(e) => setFontSearchQuery(e.target.value)}
-                  placeholder={isId ? 'Cari font...' : 'Search fonts...'}
-                  className="w-full bg-transparent text-xs text-white placeholder-neutral-500 outline-none"
-                  autoFocus
-                />
-              </div>
+              {/* Interactive Detected Text Bounding Boxes */}
+              {activeScan.blocks.map((block) => {
+                const key = makeKey(currentPage, block.id);
+                const edit = editsMap[key];
+                const isSelected = selectedBlockId === block.id;
+                const isErased = edit?.mode === 'erase';
+                const isReplaced = edit?.mode === 'replace';
 
-              <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
-                {filteredFonts.map((f) => {
-                  const isSelected = activeFontFamily === f.value;
+                if (!showOverlayBoxes && !edit && !isSelected) {
                   return (
                     <button
-                      key={f.value}
-                      onClick={() => {
-                        handleApplyFont(f.value);
-                        setIsFontDropdownOpen(false);
+                      key={block.id}
+                      type="button"
+                      onClick={() => handleSelectBlock(block)}
+                      style={{
+                        left: `${block.bbox.x}%`,
+                        top: `${block.bbox.y}%`,
+                        width: `${block.bbox.width}%`,
+                        height: `${block.bbox.height}%`,
                       }}
-                      className={`w-full px-2.5 py-1.5 rounded-lg flex items-center justify-between text-left transition-colors ${
-                        isSelected
-                          ? 'bg-[#ff3700]/20 text-[#ff3700] border border-[#ff3700]/40'
-                          : 'hover:bg-neutral-800 text-neutral-200'
-                      }`}
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-sm" style={{ fontFamily: f.value }}>
-                          {f.label}
-                        </span>
-                        <span className="text-[9px] font-mono text-neutral-500">
-                          {f.categoryLabel}
+                      className="absolute cursor-pointer bg-transparent hover:bg-[var(--color-accent)]/15 hover:outline hover:outline-1 hover:outline-[var(--color-accent)] transition-colors"
+                      title={block.text}
+                    />
+                  );
+                }
+
+                return (
+                  <button
+                    key={block.id}
+                    type="button"
+                    data-testid={`scan-block-${block.id}`}
+                    onClick={() => handleSelectBlock(block)}
+                    style={{
+                      left: `${block.bbox.x}%`,
+                      top: `${block.bbox.y}%`,
+                      width: `${block.bbox.width}%`,
+                      height: `${block.bbox.height}%`,
+                    }}
+                    className={`absolute text-left cursor-pointer transition-all rounded-[2px] group ${
+                      isSelected
+                        ? 'ring-2 ring-[var(--color-accent)] z-20'
+                        : isReplaced
+                        ? 'ring-1 ring-emerald-600/80 z-10'
+                        : isErased
+                        ? 'ring-1 ring-red-500/80 z-10'
+                        : 'border border-dashed border-sky-600/45 bg-sky-500/[0.06] hover:bg-[var(--color-accent)]/15 hover:border-[var(--color-accent)]'
+                    }`}
+                    title={block.text}
+                  >
+                    {/* Live Visual Preview for Erase */}
+                    {isErased && (
+                      <div
+                        className="w-full h-full flex items-center justify-center rounded-[1px]"
+                        style={{
+                          backgroundColor: block.bgColor || '#f2efe9',
+                          backgroundImage:
+                            'repeating-linear-gradient(45deg, rgba(220,38,38,0.14) 0, rgba(220,38,38,0.14) 4px, transparent 4px, transparent 8px)',
+                        }}
+                      >
+                        <span className="sr-only">Erased</span>
+                      </div>
+                    )}
+
+                    {/* Live Visual Preview for Replace */}
+                    {isReplaced && edit && (
+                      <div
+                        className="w-full h-full flex items-center overflow-visible px-0.5 rounded-[1px]"
+                        style={{
+                          backgroundColor: `${block.bgColor || '#f5f2eb'}E8`,
+                        }}
+                      >
+                        <span
+                          className="whitespace-nowrap leading-none pointer-events-none"
+                          style={{
+                            color: edit.textColor,
+                            fontFamily: fontChoiceToCss(edit.fontFamily),
+                            fontWeight: edit.isBold ? 700 : 400,
+                            fontSize: `clamp(8px, ${(edit.fontSize / (activeScan.pixelWidth || 1200)) * 100}cqw, 48px)`,
+                            transform: `translate(${edit.offsetX * 0.5}px, ${edit.offsetY * 0.5}px)`,
+                          }}
+                        >
+                          {edit.newText}
                         </span>
                       </div>
-                      {isSelected && <Check className="w-3.5 h-3.5 text-[#ff3700]" />}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="p-2 border-t border-neutral-800 bg-neutral-950/90">
-                <button
-                  onClick={() => fontFileInputRef.current?.click()}
-                  className="w-full py-1.5 px-2.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white flex items-center justify-center gap-2 text-xs font-semibold border border-neutral-700 transition-colors cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5 text-[#ff3700]" />
-                  <span>{isId ? 'Upload Font (.ttf / .otf)' : 'Upload Font (.ttf / .otf)'}</span>
-                </button>
-              </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* Font Size */}
-        <div className="flex items-center gap-1 bg-neutral-800 border border-neutral-700 rounded-lg px-2 h-8">
-          <span className="text-[10px] text-neutral-400 font-mono mr-0.5">{isId ? 'Ukuran:' : 'Size:'}</span>
-          <button
-            onClick={() => handleApplyFontSize(activeFontSize - 1)}
-            className="px-1 text-neutral-300 hover:text-white font-bold"
-          >
-            -
-          </button>
-          <span className="font-mono font-bold w-6 text-center text-white">
-            {activeFontSize}
-          </span>
-          <button
-            onClick={() => handleApplyFontSize(activeFontSize + 1)}
-            className="px-1 text-neutral-300 hover:text-white font-bold"
-          >
-            +
-          </button>
-        </div>
+        {/* Right Panel: Precision Inspector */}
+        <aside className="lg:col-span-4 border-t lg:border-t-0 lg:border-l border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5 flex flex-col justify-between gap-5">
+          {!selectedBlock ? (
+            <div className="flex flex-col items-center justify-center text-center py-12 px-3 my-auto">
+              <div className="w-11 h-11 rounded-md border border-[var(--color-border-strong)] bg-[var(--color-bg)] flex items-center justify-center mb-3.5">
+                <Type className="w-5 h-5 text-[var(--color-accent)]" />
+              </div>
+              <h3 className="font-display text-base font-semibold text-[var(--color-text)] mb-1.5">
+                {isId ? 'Pilih Kotak Teks di Dokumen' : 'Select a Text Box on the Page'}
+              </h3>
+              <p className="text-xs text-[var(--color-text-muted)] leading-relaxed max-w-xs mb-4">
+                {isId
+                  ? `Terdeteksi ${activeScan.blocks.length} area teks. Klik kotak mana saja untuk menghapus (Erase) atau mengganti teks (Replace) dengan tekstur kertas asli.`
+                  : `${activeScan.blocks.length} text regions detected. Click any box to Erase or Replace text while preserving original paper texture via OpenCV inpainting.`}
+              </p>
+              <div className="w-full rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-left space-y-1.5 font-mono text-[11px] text-[var(--color-text-muted)]">
+                <div className="flex justify-between">
+                  <span>{isId ? 'Engine Deteksi' : 'Detection Engine'}</span>
+                  <span className="text-[var(--color-text)] font-semibold">
+                    {activeScan.ocrEngine || 'tesseract'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{isId ? 'Resolusi Scan' : 'Scan Resolution'}</span>
+                  <span className="text-[var(--color-text)] font-semibold">
+                    {activeScan.pixelWidth} × {activeScan.pixelHeight}px
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>{isId ? 'Total Edit Aktif' : 'Active Edits'}</span>
+                  <span className="text-[var(--color-accent)] font-semibold">{totalEditedCount}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-2 pb-3 border-b border-[var(--color-border)]">
+                <div>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+                    {isId ? 'Area Teks Terpilih' : 'Selected Text Region'}
+                  </span>
+                  <p className="text-xs font-medium text-[var(--color-text)] mt-0.5 line-clamp-2">
+                    “{selectedBlock.text}”
+                  </p>
+                </div>
+                {selectedEdit && (
+                  <button
+                    type="button"
+                    onClick={handleResetSelectedBlock}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-sm border border-[var(--color-border)] text-[11px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] shrink-0"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>{isId ? 'Batal' : 'Undo'}</span>
+                  </button>
+                )}
+              </div>
 
-        {/* Bold, Italic, Underline */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={handleToggleBold}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
-              isBold
-                ? 'bg-[#ff3700] text-white border-[#ff3700]'
-                : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'
-            }`}
-            title="Tebalkan Huruf (Bold)"
-          >
-            <Bold className="w-3.5 h-3.5" />
-          </button>
+              {/* Action Mode Toggle: Replace / Erase */}
+              <div className="space-y-1.5">
+                <label className="block font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+                  {isId ? 'Aksi Inpainting' : 'Inpainting Action'}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => updateSelectedEdit({ mode: 'replace' })}
+                    className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-sm border text-xs font-semibold transition-colors ${
+                      inspectorMode === 'replace'
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-white'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:border-[var(--color-border-strong)]'
+                    }`}
+                  >
+                    <Type className="w-3.5 h-3.5" />
+                    <span>{isId ? 'Ganti Teks' : 'Replace'}</span>
+                  </button>
 
-          <button
-            onClick={handleToggleItalic}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
-              isItalic
-                ? 'bg-[#ff3700] text-white border-[#ff3700]'
-                : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'
-            }`}
-            title="Miringkan Huruf (Italic)"
-          >
-            <Italic className="w-3.5 h-3.5" />
-          </button>
+                  <button
+                    type="button"
+                    onClick={() => updateSelectedEdit({ mode: 'erase' })}
+                    className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-sm border text-xs font-semibold transition-colors ${
+                      inspectorMode === 'erase'
+                        ? 'border-red-600 bg-red-600 text-white'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:border-red-400'
+                    }`}
+                  >
+                    <Eraser className="w-3.5 h-3.5" />
+                    <span>{isId ? 'Hapus Teks' : 'Erase'}</span>
+                  </button>
+                </div>
+              </div>
 
-          <button
-            onClick={handleToggleUnderline}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${
-              isUnderline
-                ? 'bg-[#ff3700] text-white border-[#ff3700]'
-                : 'bg-neutral-800 text-neutral-300 border-neutral-700 hover:bg-neutral-700'
-            }`}
-            title="Garis Bawah (Underline)"
-          >
-            <UnderlineIcon className="w-3.5 h-3.5" />
-          </button>
-        </div>
+              {/* Replace Controls */}
+              {inspectorMode !== 'erase' && (
+                <div className="space-y-4 pt-1">
+                  {/* Replacement Text */}
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="scan-replace-text"
+                      className="block font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
+                    >
+                      {isId ? 'Teks Pengganti' : 'Replacement Text'}
+                    </label>
+                    <input
+                      id="scan-replace-text"
+                      type="text"
+                      value={inspectorText}
+                      onChange={(e) =>
+                        updateSelectedEdit({ mode: 'replace', newText: e.target.value })
+                      }
+                      placeholder={isId ? 'Ketik teks baru...' : 'Type replacement text...'}
+                      className="w-full px-3 py-2 rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg)] text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-accent)]"
+                    />
+                  </div>
 
-        {/* Alignment */}
-        <div className="hidden lg:flex items-center gap-0.5 bg-neutral-800 border border-neutral-700 rounded-lg p-0.5 h-8">
-          <button
-            onClick={() => handleApplyTextAlign('left')}
-            className={`p-1 rounded ${textAlign === 'left' ? 'bg-[#ff3700] text-white' : 'text-neutral-300 hover:text-white'}`}
-            title="Rata Kiri"
-          >
-            <AlignLeft className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => handleApplyTextAlign('center')}
-            className={`p-1 rounded ${textAlign === 'center' ? 'bg-[#ff3700] text-white' : 'text-neutral-300 hover:text-white'}`}
-            title="Rata Tengah"
-          >
-            <AlignCenter className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => handleApplyTextAlign('right')}
-            className={`p-1 rounded ${textAlign === 'right' ? 'bg-[#ff3700] text-white' : 'text-neutral-300 hover:text-white'}`}
-            title="Rata Kanan"
-          >
-            <AlignRight className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => handleApplyTextAlign('justify')}
-            className={`p-1 rounded ${textAlign === 'justify' ? 'bg-[#ff3700] text-white' : 'text-neutral-300 hover:text-white'}`}
-            title="Rata Kanan-Kiri"
-          >
-            <AlignJustify className="w-3.5 h-3.5" />
-          </button>
-        </div>
+                  {/* Font Family (Serif / Sans / Mono) + Bold */}
+                  <div className="space-y-1.5">
+                    <label className="block font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+                      {isId ? 'Gaya Font' : 'Font Family'}
+                    </label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {(['serif', 'sans', 'mono'] as FontFamilyChoice[]).map((fam) => (
+                        <button
+                          key={fam}
+                          type="button"
+                          onClick={() => updateSelectedEdit({ mode: 'replace', fontFamily: fam })}
+                          className={`py-1.5 px-2 rounded-sm border text-xs font-medium capitalize transition-colors ${
+                            inspectorFontFamily === fam
+                              ? 'border-[var(--color-text)] bg-[var(--color-text)] text-white'
+                              : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:border-[var(--color-border-strong)]'
+                          }`}
+                        >
+                          {fam}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateSelectedEdit({ mode: 'replace', isBold: !inspectorIsBold })
+                        }
+                        className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-sm border text-xs font-semibold transition-colors ${
+                          inspectorIsBold
+                            ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                            : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:border-[var(--color-border-strong)]'
+                        }`}
+                        title="Bold"
+                      >
+                        <Bold className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
 
-        {/* Text Color */}
-        <div className="flex items-center gap-1.5 bg-neutral-800 border border-neutral-700 rounded-lg px-2 h-8">
-          <span className="text-[10px] text-neutral-400 font-mono">{isId ? 'Teks:' : 'Text:'}</span>
-          <input
-            type="color"
-            value={activeTextColor}
-            onChange={(e) => handleApplyTextColor(e.target.value)}
-            className="w-5 h-5 rounded cursor-pointer border-none bg-transparent"
-            title="Warna Font"
-          />
-        </div>
+                  {/* Font Size Slider */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label
+                        htmlFor="scan-font-size"
+                        className="font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
+                      >
+                        {isId ? 'Ukuran Font' : 'Font Size'}
+                      </label>
+                      <span className="font-mono text-xs font-semibold text-[var(--color-text)]">
+                        {inspectorFontSize} px
+                      </span>
+                    </div>
+                    <input
+                      id="scan-font-size"
+                      type="range"
+                      min={8}
+                      max={72}
+                      step={1}
+                      value={inspectorFontSize}
+                      onChange={(e) =>
+                        updateSelectedEdit({
+                          mode: 'replace',
+                          fontSize: Number(e.target.value),
+                        })
+                      }
+                      className="w-full accent-[var(--color-accent)] cursor-pointer"
+                    />
+                  </div>
 
-        {/* Paper / Whiteout Background Color */}
-        <div className="flex items-center gap-1.5 bg-neutral-800 border border-neutral-700 rounded-lg px-2 h-8">
-          <span className="text-[10px] text-neutral-400 font-mono">{isId ? 'Kertas:' : 'Paper:'}</span>
-          <input
-            type="color"
-            value={currentPaperColor}
-            onChange={(e) => handleApplyPaperColor(e.target.value)}
-            className="w-5 h-5 rounded cursor-pointer border-none bg-transparent"
-            title="Warna Kertas Penutup / Tambalan Scan"
-          />
-          <span className="text-[10px] font-mono text-neutral-400 hidden xl:inline">
-            {currentPaperColor}
-          </span>
-        </div>
+                  {/* Fine-tuning Position X & Y */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label
+                          htmlFor="scan-offset-x"
+                          className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
+                        >
+                          <MoveHorizontal className="w-3 h-3" />
+                          <span>Offset X</span>
+                        </label>
+                        <span className="font-mono text-[11px] font-semibold text-[var(--color-text)]">
+                          {inspectorOffsetX > 0 ? `+${inspectorOffsetX}` : inspectorOffsetX}px
+                        </span>
+                      </div>
+                      <input
+                        id="scan-offset-x"
+                        type="range"
+                        min={-40}
+                        max={40}
+                        step={1}
+                        value={inspectorOffsetX}
+                        onChange={(e) =>
+                          updateSelectedEdit({
+                            mode: 'replace',
+                            offsetX: Number(e.target.value),
+                          })
+                        }
+                        className="w-full accent-[var(--color-accent)] cursor-pointer"
+                      />
+                    </div>
 
-        {/* Fine-nudge arrow buttons */}
-        <div className="hidden xl:flex items-center gap-0.5 bg-neutral-800 border border-neutral-700 rounded-lg px-1.5 h-8">
-          <span className="text-[10px] text-neutral-400 font-mono mr-1">Geser:</span>
-          <button
-            onClick={() => handleNudgeObject(-1, 0)}
-            className="w-5 h-6 rounded flex items-center justify-center hover:bg-neutral-700 text-neutral-300 hover:text-white"
-            title="Geser Kiri 1px"
-          >
-            ◀
-          </button>
-          <button
-            onClick={() => handleNudgeObject(0, -1)}
-            className="w-5 h-6 rounded flex items-center justify-center hover:bg-neutral-700 text-neutral-300 hover:text-white"
-            title="Geser Atas 1px"
-          >
-            ▲
-          </button>
-          <button
-            onClick={() => handleNudgeObject(0, 1)}
-            className="w-5 h-6 rounded flex items-center justify-center hover:bg-neutral-700 text-neutral-300 hover:text-white"
-            title="Geser Bawah 1px"
-          >
-            ▼
-          </button>
-          <button
-            onClick={() => handleNudgeObject(1, 0)}
-            className="w-5 h-6 rounded flex items-center justify-center hover:bg-neutral-700 text-neutral-300 hover:text-white"
-            title="Geser Kanan 1px"
-          >
-            ▶
-          </button>
-        </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label
+                          htmlFor="scan-offset-y"
+                          className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
+                        >
+                          <MoveVertical className="w-3 h-3" />
+                          <span>Offset Y</span>
+                        </label>
+                        <span className="font-mono text-[11px] font-semibold text-[var(--color-text)]">
+                          {inspectorOffsetY > 0 ? `+${inspectorOffsetY}` : inspectorOffsetY}px
+                        </span>
+                      </div>
+                      <input
+                        id="scan-offset-y"
+                        type="range"
+                        min={-40}
+                        max={40}
+                        step={1}
+                        value={inspectorOffsetY}
+                        onChange={(e) =>
+                          updateSelectedEdit({
+                            mode: 'replace',
+                            offsetY: Number(e.target.value),
+                          })
+                        }
+                        className="w-full accent-[var(--color-accent)] cursor-pointer"
+                      />
+                    </div>
+                  </div>
 
-        {/* Delete / Erase active object */}
-        {activeObject && (
-          <button
-            onClick={handleDeleteActiveObject}
-            className="flex items-center gap-1 ml-auto px-2.5 h-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-colors cursor-pointer"
-            title="Hapus objek ini (Teks lama tetap tertutup rapi oleh tambalan kertas)"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span className="font-semibold text-xs">{isId ? 'Hapus' : 'Delete'}</span>
-          </button>
-        )}
+                  {/* Auto Ink Color Picker */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label
+                        htmlFor="scan-ink-color"
+                        className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
+                      >
+                        <Pipette className="w-3 h-3" />
+                        <span>{isId ? 'Warna Tinta (Auto-Sample)' : 'Ink Color (Auto-Sampled)'}</span>
+                      </label>
+                      {selectedBlock.textColor &&
+                        inspectorColor.toLowerCase() !== selectedBlock.textColor.toLowerCase() && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateSelectedEdit({
+                                mode: 'replace',
+                                textColor: selectedBlock.textColor,
+                              })
+                            }
+                            className="text-[10px] font-mono text-[var(--color-accent)] hover:underline"
+                          >
+                            {isId ? 'Auto' : 'Reset Auto'}
+                          </button>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2.5 p-2 rounded-sm border border-[var(--color-border)] bg-[var(--color-bg)]">
+                      <input
+                        id="scan-ink-color"
+                        type="color"
+                        value={inspectorColor}
+                        onChange={(e) =>
+                          updateSelectedEdit({ mode: 'replace', textColor: e.target.value })
+                        }
+                        className="w-8 h-7 rounded-sm border border-[var(--color-border-strong)] cursor-pointer bg-transparent"
+                      />
+                      <span className="font-mono text-xs font-semibold text-[var(--color-text)] uppercase">
+                        {inspectorColor}
+                      </span>
+                      <span className="ml-auto font-mono text-[10px] text-[var(--color-text-muted)]">
+                        {isId ? 'Tinta Asli' : 'Sampled'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-      </div>
+              {inspectorMode === 'erase' && (
+                <div className="rounded-sm border border-red-200 bg-red-50/70 p-3 text-xs text-red-800 leading-relaxed">
+                  {isId
+                    ? 'Teks pada kotak ini akan dihapus dengan OpenCV Telea Inpainting sehingga tekstur & gradasi kertas asli tetap menyatu mulus tanpa kotak tambalan.'
+                    : 'Text in this box will be erased via OpenCV Telea inpainting, seamlessly restoring the original paper texture and gradient without patch boxes.'}
+                </div>
+              )}
+            </div>
+          )}
 
-      {/* 3. INTERACTIVE FABRIC.JS CANVAS VIEWPORT */}
-      <div
-        ref={viewportContainerRef}
-        className="w-full min-h-[620px] max-h-[80vh] overflow-auto p-6 sm:p-10 bg-neutral-950/70 flex justify-center items-start relative select-none"
-      >
-        {isPageLoading ? (
-          <div className="flex flex-col items-center justify-center p-20 gap-3 text-neutral-400">
-            <Loader2 className="w-8 h-8 animate-spin text-[#ff3700]" />
-            <span className="text-sm font-mono">
-              {isId ? 'Memindai area teks & warna dokumen...' : 'Scanning document text & colors...'}
+          {/* Footer Summary */}
+          <div className="pt-3 border-t border-[var(--color-border)] flex items-center justify-between text-[11px] font-mono text-[var(--color-text-muted)]">
+            <span className="inline-flex items-center gap-1.5">
+              <Check className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{isId ? 'Zero-Storage (RAM Only)' : 'Zero-Storage (RAM Only)'}</span>
             </span>
+            <span>2 Credits / VVIP</span>
           </div>
-        ) : (
-          <div className="relative shadow-2xl border border-black/15 rounded-sm bg-white overflow-hidden">
-            <canvas ref={canvasElementRef} />
-          </div>
-        )}
+        </aside>
       </div>
-
     </div>
   );
 };
