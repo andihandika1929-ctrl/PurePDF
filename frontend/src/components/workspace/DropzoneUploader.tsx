@@ -335,7 +335,7 @@ export const DropzoneUploader: React.FC<{
             setPaywallOpen(true);
             throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
           }
-          if (backendErr?.status === 413 || backendErr?.status === 503) {
+          if (backendErr?.status === 413 || backendErr?.status === 503 || backendErr?.status === 504 || backendErr?.status === 500) {
             throw new Error(backendErr.message);
           }
           throw new Error(
@@ -379,7 +379,7 @@ export const DropzoneUploader: React.FC<{
             setPaywallOpen(true);
             throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
           }
-          if (backendErr?.status === 413 || backendErr?.status === 503) {
+          if (backendErr?.status === 413 || backendErr?.status === 503 || backendErr?.status === 504 || backendErr?.status === 500) {
             throw new Error(backendErr.message);
           }
           throw new Error(
@@ -425,7 +425,7 @@ export const DropzoneUploader: React.FC<{
             setPaywallOpen(true);
             throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
           }
-          if (backendErr?.status === 413 || backendErr?.status === 503) {
+          if (backendErr?.status === 413 || backendErr?.status === 503 || backendErr?.status === 504 || backendErr?.status === 500) {
             throw new Error(backendErr.message);
           }
           throw new Error(

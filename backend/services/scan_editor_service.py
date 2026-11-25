@@ -377,22 +377,50 @@ def _detect_boxes_tesseract(bgr_img: np.ndarray) -> Tuple[List[Dict[str, Any]], 
     return _merge_line_boxes(words), f"tesseract-{used_lang}"
 
 
-def _render_input_page(file_bytes: bytes, page_index: int = 0) -> Tuple[np.ndarray, int, float, float, Optional[fitz.Page]]:
+def _render_input_page(file_bytes: bytes, page_index: int = 0) -> Tuple[np.ndarray, int, float, float, List[Dict[str, Any]]]:
     """
     Load a single page from PDF (at 180 DPI) or decode a screenshot image directly.
+    Extracts native PDF words and closes the PyMuPDF document immediately so RAM is
+    freed BEFORE Tesseract OCR runs (critical for Render 512MB Free Tier).
     """
     is_pdf = file_bytes[:4] == b"%PDF"
     if is_pdf:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        total_pages = len(doc)
-        safe_idx = max(0, min(page_index, total_pages - 1))
-        page = doc[safe_idx]
-        rect = page.rect
-        zoom = RENDER_DPI / 72.0
-        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-        img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
-        bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-        return bgr, total_pages, float(rect.width), float(rect.height), page
+        try:
+            total_pages = len(doc)
+            safe_idx = max(0, min(page_index, total_pages - 1))
+            page = doc[safe_idx]
+            rect = page.rect
+            zoom = RENDER_DPI / 72.0
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+            img_rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3)
+            bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+
+            native_boxes: List[Dict[str, Any]] = []
+            words = page.get_text("words")
+            if words and len(words) >= 2:
+                word_boxes = []
+                for w_item in words:
+                    x0, y0, x1, y1, word_str = w_item[0], w_item[1], w_item[2], w_item[3], w_item[4]
+                    if not str(word_str).strip():
+                        continue
+                    word_boxes.append(
+                        {
+                            "text": str(word_str).strip(),
+                            "x": int(round(x0 * zoom)),
+                            "y": int(round(y0 * zoom)),
+                            "w": max(4, int(round((x1 - x0) * zoom))),
+                            "h": max(6, int(round((y1 - y0) * zoom))),
+                        }
+                    )
+                native_boxes = _merge_line_boxes(word_boxes)
+
+            page_w, page_h = float(rect.width), float(rect.height)
+            del pix, img_rgb
+            return bgr, total_pages, page_w, page_h, native_boxes
+        finally:
+            doc.close()
+            gc.collect()
 
     arr = np.frombuffer(file_bytes, np.uint8)
     bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -404,7 +432,7 @@ def _render_input_page(file_bytes: bytes, page_index: int = 0) -> Tuple[np.ndarr
         scale = max_dim / float(max(h, w))
         bgr = cv2.resize(bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         h, w = bgr.shape[:2]
-    return bgr, 1, float(w * 72.0 / RENDER_DPI), float(h * 72.0 / RENDER_DPI), None
+    return bgr, 1, float(w * 72.0 / RENDER_DPI), float(h * 72.0 / RENDER_DPI), []
 
 
 def scan_document_for_editor(file_bytes: bytes, page_index: int = 0) -> Dict[str, Any]:
@@ -414,34 +442,12 @@ def scan_document_for_editor(file_bytes: bytes, page_index: int = 0) -> Dict[str
     (strictly NO fake placeholder text), and performs per-block typography, ink, baseline,
     and skew analysis.
     """
-    bgr, total_pages, page_w, page_h, fitz_page = _render_input_page(file_bytes, page_index)
+    bgr, total_pages, page_w, page_h, raw_boxes = _render_input_page(file_bytes, page_index)
     img_h, img_w = bgr.shape[:2]
 
-    raw_boxes: List[Dict[str, Any]] = []
     ocr_engine = "pymupdf"
 
-    # 1. Native digital PDF text layer (instant, 100% accurate if present)
-    if fitz_page is not None:
-        zoom = RENDER_DPI / 72.0
-        words = fitz_page.get_text("words")
-        if words and len(words) >= 2:
-            word_boxes = []
-            for w_item in words:
-                x0, y0, x1, y1, word_str = w_item[0], w_item[1], w_item[2], w_item[3], w_item[4]
-                if not str(word_str).strip():
-                    continue
-                word_boxes.append(
-                    {
-                        "text": str(word_str).strip(),
-                        "x": int(round(x0 * zoom)),
-                        "y": int(round(y0 * zoom)),
-                        "w": max(4, int(round((x1 - x0) * zoom))),
-                        "h": max(6, int(round((y1 - y0) * zoom))),
-                    }
-                )
-            raw_boxes = _merge_line_boxes(word_boxes)
-
-    # 2. Scanned PDF or Screenshot -> REAL Tesseract OCR (NO placeholder fallback!)
+    # Scanned PDF or Screenshot (no native text layer) -> REAL Tesseract OCR
     if not raw_boxes:
         raw_boxes, ocr_engine = _detect_boxes_tesseract(bgr)
 
