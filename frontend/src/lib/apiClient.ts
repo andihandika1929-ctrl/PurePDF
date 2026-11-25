@@ -2,19 +2,63 @@
 import { getSupabase } from './supabaseClient';
 
 export const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'http://localhost:8000';
 
-async function getAuthHeaders(): Promise<Record<string, string>> {
+async function getAuthHeaders(forceRefresh = false): Promise<Record<string, string>> {
   const supabase = getSupabase();
   if (!supabase) return {};
   try {
-    const { data } = await supabase.auth.getSession();
-    const token = data?.session?.access_token;
+    let session = null as any;
+    if (!forceRefresh) {
+      const { data } = await supabase.auth.getSession();
+      session = data?.session || null;
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const isExpiringSoon =
+      !session?.access_token ||
+      (typeof session?.expires_at === 'number' && session.expires_at - nowSec < 60);
+
+    if (forceRefresh || isExpiringSoon) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed?.session?.access_token) {
+        session = refreshed.session;
+      }
+    }
+
+    const token = session?.access_token;
     if (token) {
       return { Authorization: `Bearer ${token}` };
     }
   } catch {}
   return {};
+}
+
+async function fetchWithAuthRetry(
+  url: string,
+  buildBody: () => FormData
+): Promise<Response> {
+  const headers = await getAuthHeaders(false);
+  let res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: buildBody(),
+  });
+
+  if (res.status === 401) {
+    const refreshedHeaders = await getAuthHeaders(true);
+    if (refreshedHeaders.Authorization && refreshedHeaders.Authorization !== headers.Authorization) {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: refreshedHeaders,
+        body: buildBody(),
+      });
+    }
+  }
+
+  return res;
 }
 
 export async function checkBackendHealth(): Promise<{
@@ -65,15 +109,11 @@ async function parseBackendError(res: Response, fallback: string): Promise<Error
 }
 
 export async function apiCompressTarget(file: File, targetKb: number): Promise<Blob> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('target_kb', String(targetKb));
-
-  const authHeaders = await getAuthHeaders();
-  const res = await fetch(`${BACKEND_URL}/api/compress-target`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: formData,
+  const res = await fetchWithAuthRetry(`${BACKEND_URL}/api/compress-target`, () => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('target_kb', String(targetKb));
+    return formData;
   });
 
   if (!res.ok) {
@@ -84,15 +124,11 @@ export async function apiCompressTarget(file: File, targetKb: number): Promise<B
 }
 
 export async function apiForceUnlock(file: File, password = ''): Promise<Blob> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('password', password);
-
-  const authHeaders = await getAuthHeaders();
-  const res = await fetch(`${BACKEND_URL}/api/force-unlock`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: formData,
+  const res = await fetchWithAuthRetry(`${BACKEND_URL}/api/force-unlock`, () => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('password', password);
+    return formData;
   });
 
   if (!res.ok) {
@@ -103,14 +139,10 @@ export async function apiForceUnlock(file: File, password = ''): Promise<Blob> {
 }
 
 export async function apiPdfToWord(file: File): Promise<Blob> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const authHeaders = await getAuthHeaders();
-  const res = await fetch(`${BACKEND_URL}/api/pdf-to-word`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: formData,
+  const res = await fetchWithAuthRetry(`${BACKEND_URL}/api/pdf-to-word`, () => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return formData;
   });
 
   if (!res.ok) {
@@ -125,16 +157,12 @@ export async function apiAiEditScanned(
   boxes: any[] = [],
   instruction = ''
 ): Promise<Blob> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('boxes', JSON.stringify(boxes));
-  if (instruction) formData.append('instruction', instruction);
-
-  const authHeaders = await getAuthHeaders();
-  const res = await fetch(`${BACKEND_URL}/api/ai-edit-scanned`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: formData,
+  const res = await fetchWithAuthRetry(`${BACKEND_URL}/api/ai-edit-scanned`, () => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('boxes', JSON.stringify(boxes));
+    if (instruction) formData.append('instruction', instruction);
+    return formData;
   });
 
   if (!res.ok) {
@@ -145,14 +173,10 @@ export async function apiAiEditScanned(
 }
 
 export async function apiOcrDetect(file: File): Promise<any> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const authHeaders = await getAuthHeaders();
-  const res = await fetch(`${BACKEND_URL}/api/ocr-detect`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: formData,
+  const res = await fetchWithAuthRetry(`${BACKEND_URL}/api/ocr-detect`, () => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return formData;
   });
 
   if (!res.ok) {
@@ -163,15 +187,11 @@ export async function apiOcrDetect(file: File): Promise<any> {
 }
 
 export async function apiInpaint(file: File, boxes: any[]): Promise<Blob> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('boxes', JSON.stringify(boxes));
-
-  const authHeaders = await getAuthHeaders();
-  const res = await fetch(`${BACKEND_URL}/api/inpaint`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: formData,
+  const res = await fetchWithAuthRetry(`${BACKEND_URL}/api/inpaint`, () => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('boxes', JSON.stringify(boxes));
+    return formData;
   });
 
   if (!res.ok) {
@@ -241,15 +261,11 @@ export async function apiScanEditor(
   file: File,
   pageIndex: number = 0
 ): Promise<ScanEditorResponse> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('page_index', String(pageIndex));
-
-  const authHeaders = await getAuthHeaders();
-  const res = await fetch(`${BACKEND_URL}/api/ai/scan-editor`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: formData,
+  const res = await fetchWithAuthRetry(`${BACKEND_URL}/api/ai/scan-editor`, () => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('page_index', String(pageIndex));
+    return formData;
   });
 
   if (!res.ok) {
@@ -263,15 +279,11 @@ export async function apiApplyScanEdits(
   file: File,
   edits: ScanEditItem[]
 ): Promise<Blob> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('edits', JSON.stringify(edits));
-
-  const authHeaders = await getAuthHeaders();
-  const res = await fetch(`${BACKEND_URL}/api/ai/scan-editor/apply`, {
-    method: 'POST',
-    headers: authHeaders,
-    body: formData,
+  const res = await fetchWithAuthRetry(`${BACKEND_URL}/api/ai/scan-editor/apply`, () => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('edits', JSON.stringify(edits));
+    return formData;
   });
 
   if (!res.ok) {

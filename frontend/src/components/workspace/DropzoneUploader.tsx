@@ -321,15 +321,21 @@ export const DropzoneUploader: React.FC<{
           return;
         } catch (backendErr: any) {
           if (backendErr?.status === 401) {
-            openAuthModal('login');
-            throw new Error(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+            if (!user) openAuthModal('login');
+            throw new Error(
+              backendErr?.message
+                ? `${isId ? 'Verifikasi sesi ditolak server' : 'Server rejected auth session'}: ${backendErr.message}`
+                : isId
+                ? 'Sesi login Anda habis. Silakan keluar lalu masuk kembali.'
+                : 'Your session expired. Please sign out and sign in again.'
+            );
           }
           if (backendErr?.status === 402) {
             setActiveProToolName(toolName);
             setPaywallOpen(true);
             throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
           }
-          if (backendErr?.status === 413) {
+          if (backendErr?.status === 413 || backendErr?.status === 503) {
             throw new Error(backendErr.message);
           }
           throw new Error(
@@ -359,15 +365,21 @@ export const DropzoneUploader: React.FC<{
           return;
         } catch (backendErr: any) {
           if (backendErr?.status === 401) {
-            openAuthModal('login');
-            throw new Error(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+            if (!user) openAuthModal('login');
+            throw new Error(
+              backendErr?.message
+                ? `${isId ? 'Verifikasi sesi ditolak server' : 'Server rejected auth session'}: ${backendErr.message}`
+                : isId
+                ? 'Sesi login Anda habis. Silakan keluar lalu masuk kembali.'
+                : 'Your session expired. Please sign out and sign in again.'
+            );
           }
           if (backendErr?.status === 402) {
             setActiveProToolName(toolName);
             setPaywallOpen(true);
             throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
           }
-          if (backendErr?.status === 413) {
+          if (backendErr?.status === 413 || backendErr?.status === 503) {
             throw new Error(backendErr.message);
           }
           throw new Error(
@@ -399,15 +411,21 @@ export const DropzoneUploader: React.FC<{
           return;
         } catch (backendErr: any) {
           if (backendErr?.status === 401) {
-            openAuthModal('login');
-            throw new Error(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+            if (!user) openAuthModal('login');
+            throw new Error(
+              backendErr?.message
+                ? `${isId ? 'Verifikasi sesi ditolak server' : 'Server rejected auth session'}: ${backendErr.message}`
+                : isId
+                ? 'Sesi login Anda habis. Silakan keluar lalu masuk kembali.'
+                : 'Your session expired. Please sign out and sign in again.'
+            );
           }
           if (backendErr?.status === 402) {
             setActiveProToolName(toolName);
             setPaywallOpen(true);
             throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
           }
-          if (backendErr?.status === 413) {
+          if (backendErr?.status === 413 || backendErr?.status === 503) {
             throw new Error(backendErr.message);
           }
           throw new Error(

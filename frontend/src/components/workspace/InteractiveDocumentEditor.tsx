@@ -203,8 +203,15 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
       setCurrentPage(targetPage);
     } catch (err: any) {
       if (err?.status === 401) {
-        openAuthModal('login');
-        setErrorMsg(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+        setErrorMsg(
+          err?.message
+            ? `${isId ? 'Verifikasi sesi ditolak server' : 'Server rejected auth session'}: ${err.message}`
+            : isId
+            ? 'Sesi login Anda habis. Silakan keluar lalu masuk kembali.'
+            : 'Your session expired. Please sign out and sign in again.'
+        );
+      } else if (err?.status === 503) {
+        setErrorMsg(err.message);
       } else {
         setErrorMsg(
           isId
@@ -250,13 +257,18 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
       onDownload(blob, `${baseName}_ai_edited.pdf`);
     } catch (err: any) {
       if (err?.status === 401) {
-        openAuthModal('login');
-        setErrorMsg(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+        setErrorMsg(
+          err?.message
+            ? `${isId ? 'Verifikasi sesi ditolak server' : 'Server rejected auth session'}: ${err.message}`
+            : isId
+            ? 'Sesi login Anda habis. Silakan keluar lalu masuk kembali.'
+            : 'Your session expired. Please sign out and sign in again.'
+        );
       } else if (err?.status === 402) {
         setActiveProToolName(isId ? 'AI Edit PDF Scan & Screenshot' : 'AI Edit Scanned & Screenshot PDF');
         setPaywallOpen(true);
         setErrorMsg(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
-      } else if (err?.status === 413) {
+      } else if (err?.status === 413 || err?.status === 503) {
         setErrorMsg(err.message);
       } else {
         setErrorMsg(

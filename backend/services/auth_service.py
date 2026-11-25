@@ -6,9 +6,9 @@ from fastapi import Header, HTTPException, status
 
 
 def _get_supabase_config() -> tuple[str, str, str]:
-    url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or ""
-    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY") or ""
-    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or ""
+    url = (os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL") or "").strip()
+    anon_key = (os.getenv("SUPABASE_ANON_KEY") or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY") or "").strip()
+    service_key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
     return url.rstrip("/"), anon_key, service_key
 
 
@@ -19,6 +19,7 @@ async def verify_supabase_jwt(
     FastAPI dependency that verifies a Supabase Bearer JWT against Supabase Auth
     (/auth/v1/user) and returns the authenticated user object.
     Rejects missing, malformed, expired, or revoked tokens with HTTP 401.
+    Distinguishes server API-key misconfiguration (HTTP 503) from user token errors (HTTP 401).
     """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
@@ -36,7 +37,7 @@ async def verify_supabase_jwt(
         )
 
     supabase_url, anon_key, service_key = _get_supabase_config()
-    api_key = service_key or anon_key
+    api_key = anon_key or service_key
     if not supabase_url or not api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -59,9 +60,25 @@ async def verify_supabase_jwt(
         )
 
     if res.status_code != 200:
+        err_body = ""
+        try:
+            err_json = res.json()
+            err_body = str(err_json.get("message") or err_json.get("msg") or err_json.get("error_description") or "")
+        except Exception:
+            err_body = (res.text or "")[:160]
+
+        lower_err = err_body.lower()
+        # Server misconfiguration (invalid apikey on Render) must NOT trigger a client login loop!
+        if "invalid api key" in lower_err or "no api key" in lower_err or "apikey" in lower_err:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Server Supabase API key misconfigured. Check SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY on backend.",
+            )
+
+        reason = f" ({err_body[:100]})" if err_body else ""
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired Supabase JWT.",
+            detail=f"Invalid or expired Supabase JWT{reason}.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
