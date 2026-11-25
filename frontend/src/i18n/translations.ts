@@ -74,32 +74,32 @@ export const TRANSLATIONS = {
       c4Desc: 'Seamlessly responsive on all screen sizes and ready to install as an offline-capable PWA on Chrome & Edge.'
     },
     pricing: {
-      kicker: 'TRANSPARENT DECOY TIERS',
+      kicker: 'FLEXIBLE PRICING',
       balance: 'CURRENT BALANCE',
-      vvipUnlimited: '👑 VVIP UNLIMITED',
+      vvipUnlimited: 'VVIP UNLIMITED',
       credits: 'CREDITS',
       title1: 'Simple, transparent pricing for',
       titleHighlight: 'pro-grade PDF',
       title2: 'power.',
       description:
-        '21 tools are 100% free forever. Pay only for heavy AI neural compute with non-expiring credit packs or unlimited VVIP.',
+        'Standard local tools are 100% free forever. Upgrade with non-expiring credit packs or VVIP for heavy PRO AI compute and 0-second ad-free downloads.',
       starterTitle: 'STARTER PACK',
       starterPrice: '$0.50',
       starterSub: 'Rp 5.000 / One-time',
       starterDesc: 'Perfect for quick emergency tasks and small file jobs.',
       starterItem1: '5 AI Credits ($0.10/credit)',
       starterItem2: 'Never expires',
-      starterItem3: 'Use on any of the 5 PRO AI tools',
-      buyStarter: 'Buy 5 Credits ($0.50)',
+      starterItem3: 'Use on any PRO AI tool',
+      buyStarter: 'Order 5 Credits ($0.50)',
 
-      decoyTitle: 'DECOY VALUE',
+      decoyTitle: 'BEST VALUE',
       decoyPrice: '$1.00',
       decoySub: 'Rp 10.000 / One-time',
       decoyDesc: 'Mid-tier pack for documents, forms, and occasional unlock tasks.',
       decoyItem1: '12 AI Credits (20% bonus)',
       decoyItem2: '33% Savings per credit',
       decoyItem3: 'Never expires',
-      buyDecoy: 'Buy 12 Credits ($1.00)',
+      buyDecoy: 'Order 12 Credits ($1.00)',
 
       popularTitle: 'POWER CREATOR',
       popularBadge: 'POPULAR PACK',
@@ -109,25 +109,25 @@ export const TRANSLATIONS = {
       popularItem1: '25 AI Credits (50% bonus)',
       popularItem2: 'Best credit-per-dollar value',
       popularItem3: 'Priority queue processing',
-      buyPopular: 'Buy 25 Credits ($1.50)',
+      buyPopular: 'Order 25 Credits ($1.50)',
 
-      vvipBadge: '⭐ RECOMMENDED VVIP',
+      vvipBadge: 'RECOMMENDED VVIP',
       vvipTag: 'UNLIMITED PASS',
       vvipPrice: '$2.00',
       vvipPeriod: '/ month',
       vvipSub: 'Rp 29.000 / month • Cancel anytime',
       vvipDesc: 'Unrestricted freedom. No credit calculation, no waiting, zero advertisements.',
-      vvipItem1: 'Unlimited PRO AI Tools (Edit, Force Unlock, High-Accuracy Word)',
-      vvipItem2: '0-Second Instant Downloads (Bypass 12s AdSense timer)',
-      vvipItem3: '100% Ad-Free Experience',
+      vvipItem1: 'PRO AI Tools (Force Unlock, High-Accuracy Word & more)',
+      vvipItem2: '0-Second Instant Downloads (Bypass countdown timer)',
+      vvipItem3: '100% Ad-Free Workspace',
       vvipItem4: 'Up to 500 MB per file handling',
-      activateVvip: 'Activate VVIP Pass ($2.00 / Rp 29rb)',
-      vvipActive: 'VVIP Active (Simulate Renew)',
+      activateVvip: 'Order VVIP Pass ($2.00 / Rp 29rb)',
+      vvipActive: 'Extend / Renew VVIP',
 
-      paymentTitle: 'Supported Payment Methods',
+      paymentTitle: 'Manual Verification (QRIS & Bank Transfer)',
       paymentDesc:
-        'Instant QRIS (GoPay, OVO, Dana, ShopeePay, BCA) & Global Cards/PayPal via Stripe & LemonSqueezy.',
-      sslEncrypted: '256-BIT SSL ENCRYPTED'
+        'Order directly via Instagram DM or Email. Instant activation by admin once transfer/QRIS receipt is confirmed.',
+      sslEncrypted: 'ADMIN-VERIFIED PROVISIONING'
     },
     uploader: {
       dropTitle: 'Drop your PDF here, or',
@@ -172,7 +172,7 @@ export const TRANSLATIONS = {
       vvipPeriod: '/ mo',
       vvipAdv1: 'Unlimited PRO AI Tools',
       vvipAdv2: '0s Instant Downloads (No Ads)',
-      simulateVvip: 'Simulate VVIP Activation',
+      simulateVvip: 'Order VVIP Pass',
       zeroStorageNotice: 'Zero Server Storage • Instant Auto-Purge'
     }
   },
@@ -249,7 +249,7 @@ export const TRANSLATIONS = {
       c4Desc: 'Responsif di ponsel pintar, tablet, dan PC, serta siap di-install sebagai aplikasi PWA langsung dari browser.'
     },
     pricing: {
-      kicker: 'PAKET HARGA TRANSPARAN',
+      kicker: 'HARGA FLEKSIBEL',
       balance: 'SALDO ANDA SAAT INI',
       vvipUnlimited: '👑 VVIP UNLIMITED',
       credits: 'KREDIT',
@@ -267,7 +267,7 @@ export const TRANSLATIONS = {
       starterItem3: 'Bisa dipakai di semua 5 alat PRO AI',
       buyStarter: 'Beli 5 Kredit (Rp 5.000)',
 
-      decoyTitle: 'PAKET STANDAR',
+      decoyTitle: 'BEST VALUE',
       decoyPrice: 'Rp 10.000',
       decoySub: '~$1.00 USD / Sekali Bayar',
       decoyDesc: 'Pilihan hemat untuk mahasiswa, pengeditan berkas, dan pembukaan proteksi PDF.',
@@ -296,8 +296,8 @@ export const TRANSLATIONS = {
       vvipItem2: 'Download Langsung 0 Detik (Lewati hitungan iklan 12 detik)',
       vvipItem3: '100% Bebas Iklan',
       vvipItem4: 'Mendukung ukuran file besar hingga 500 MB',
-      activateVvip: 'Aktifkan VVIP Sekarang (Rp 29.000)',
-      vvipActive: 'VVIP Aktif (Simulasi Perpanjang)',
+      activateVvip: 'Order VVIP Sekarang (Rp 29.000)',
+      vvipActive: 'Perpanjang VVIP',
 
       paymentTitle: 'Metode Pembayaran Resmi',
       paymentDesc:
@@ -347,7 +347,7 @@ export const TRANSLATIONS = {
       vvipPeriod: '/ bln',
       vvipAdv1: 'Semua 5 Alat PRO AI Tanpa Batas',
       vvipAdv2: 'Download Langsung 0 Detik (Bebas Iklan)',
-      simulateVvip: 'Simulasikan Aktivasi VVIP',
+      simulateVvip: 'Order Paket VVIP',
       zeroStorageNotice: 'Tanpa Penyimpanan Server • File Dihapus Otomatis'
     }
   }

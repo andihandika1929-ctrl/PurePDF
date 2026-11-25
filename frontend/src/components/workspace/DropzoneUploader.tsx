@@ -107,7 +107,6 @@ export const DropzoneUploader: React.FC<{
     isUnlimited,
     dailyAiUsed,
     credits,
-    spendCredits,
     openAuthModal,
     checkAndConsumeAiQuota,
     isInternalMode,

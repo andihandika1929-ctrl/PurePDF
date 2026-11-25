@@ -390,60 +390,10 @@ export async function syncUserProfile(
 }
 
 /**
- * Persist credit updates to Supabase profiles table
+ * Direct client-side credit & VVIP mutations are disabled for security.
+ * Credits and VVIP activation are provisioned exclusively via server-side /api/admin/users
+ * and deducted atomically via PostgreSQL RPC `consume_ai_quota_atomic`.
  */
-export async function updateUserCredits(userId: string, newCredits: number) {
-  const supabase = getSupabase();
-  if (supabase) {
-    try {
-      await supabase.from('profiles').update({ credits: newCredits }).eq('id', userId);
-    } catch (e) {
-      console.warn('Could not update user credits in Supabase:', e);
-    }
-  }
-  if (typeof window !== 'undefined') {
-    const raw = localStorage.getItem(`purepdf_profile_${userId}`);
-    if (raw) {
-      try {
-        const p = JSON.parse(raw);
-        p.credits = newCredits;
-        localStorage.setItem(`purepdf_profile_${userId}`, JSON.stringify(p));
-      } catch {}
-    }
-  }
-}
-
-/**
- * Persist VVIP activation to Supabase profiles table
- */
-export async function updateUserVvip(userId: string, isVvip: boolean, expiryDays = 30) {
-  const supabase = getSupabase();
-  const vvipExpiry = isVvip
-    ? new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString()
-    : null;
-
-  if (supabase) {
-    try {
-      await supabase
-        .from('profiles')
-        .update({ is_vvip: isVvip, vvip_expires_at: vvipExpiry })
-        .eq('id', userId);
-    } catch (e) {
-      console.warn('Could not update user VVIP in Supabase:', e);
-    }
-  }
-  if (typeof window !== 'undefined') {
-    const raw = localStorage.getItem(`purepdf_profile_${userId}`);
-    if (raw) {
-      try {
-        const p = JSON.parse(raw);
-        p.is_vvip = isVvip;
-        p.vvip_expires_at = vvipExpiry;
-        localStorage.setItem(`purepdf_profile_${userId}`, JSON.stringify(p));
-      } catch {}
-    }
-  }
-}
 
 export interface QuotaCheckResult {
   allowed: boolean;
@@ -503,81 +453,11 @@ export async function consumeAiQuota(
     };
   }
 
-  // Calculate current daily used with day-reset
-  const lastReset = user.last_ai_reset ? String(user.last_ai_reset).split('T')[0] : today;
-  const currentDailyUsed = lastReset === today ? (user.daily_ai_used || 0) : 0;
-
-  // 2. Active VVIP Member
-  const isVvipActive = user.is_vvip && (!user.vvip_expires_at || new Date(user.vvip_expires_at) > new Date());
-  if (isVvipActive) {
-    if (currentDailyUsed < 15) {
-      const newDailyUsed = currentDailyUsed + 1;
-      if (supabase) {
-        try {
-          await supabase.from('profiles').update({
-            daily_ai_used: newDailyUsed,
-            last_ai_reset: today,
-            updated_at: new Date().toISOString(),
-          }).eq('id', user.id);
-        } catch (e) {
-          console.warn('Could not update daily_ai_used in Supabase:', e);
-        }
-      }
-      if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem(`purepdf_profile_${user.id}`);
-        if (stored) {
-          try {
-            const p = JSON.parse(stored);
-            p.daily_ai_used = newDailyUsed;
-            p.last_ai_reset = today;
-            localStorage.setItem(`purepdf_profile_${user.id}`, JSON.stringify(p));
-          } catch {}
-        }
-      }
-      return {
-        allowed: true,
-        quotaType: 'vvip_daily',
-        dailyUsed: newDailyUsed,
-        creditsRemaining: user.credits,
-      };
-    }
-
-    // Daily 15x exhausted: Deduct 2 backup credits
-    if (user.credits >= cost) {
-      const newCredits = user.credits - cost;
-      await updateUserCredits(user.id, newCredits);
-      return {
-        allowed: true,
-        quotaType: 'vvip_backup',
-        dailyUsed: 15,
-        creditsRemaining: newCredits,
-      };
-    }
-
-    return {
-      allowed: false,
-      errorReason: 'daily_and_credits_exhausted',
-      dailyUsed: 15,
-      creditsRemaining: user.credits,
-    };
-  }
-
-  // 3. Regular Free user: Deduct 2 credits
-  if (user.credits >= cost) {
-    const newCredits = user.credits - cost;
-    await updateUserCredits(user.id, newCredits);
-    return {
-      allowed: true,
-      quotaType: 'free_credits',
-      dailyUsed: 0,
-      creditsRemaining: newCredits,
-    };
-  }
-
+  // If atomic RPC failed or was unavailable, fail closed (never allow client-side credit tampering)
   return {
     allowed: false,
     errorReason: 'insufficient_credits',
-    dailyUsed: 0,
+    dailyUsed: user.daily_ai_used || 0,
     creditsRemaining: user.credits,
   };
 }

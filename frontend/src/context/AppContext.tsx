@@ -10,8 +10,6 @@ import {
   resetPasswordForEmail,
   signOutUser,
   syncUserProfile,
-  updateUserCredits,
-  updateUserVvip,
   consumeAiQuota,
   QuotaCheckResult,
   getSupabase,
@@ -29,9 +27,6 @@ interface AppContextType {
   setLanguage: (lang: Language) => void;
   toggleLanguage: () => void;
   t: (typeof TRANSLATIONS)['en'];
-  addCredits: (amount: number) => void;
-  activateVvip: () => void;
-  spendCredits: (cost: number) => boolean;
   checkAndConsumeAiQuota: (cost?: number) => Promise<QuotaCheckResult>;
   isPaywallOpen: boolean;
   setPaywallOpen: (open: boolean) => void;
@@ -165,7 +160,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (mockUser) {
             try {
               applyProfile(JSON.parse(mockUser));
-            } catch {}
+            } catch { }
           }
         }
         setAuthLoading(false);
@@ -235,7 +230,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (mockUser) {
         try {
           applyProfile(JSON.parse(mockUser));
-        } catch {}
+        } catch { }
       }
       setAuthLoading(false);
     }
@@ -400,47 +395,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const addCredits = (amount: number) => {
-    if (isInternalMode) return;
-    setCredits((prev) => {
-      const updated = prev + amount;
-      if (user) {
-        const updatedUser = { ...user, credits: updated };
-        setUser(updatedUser);
-        updateUserCredits(user.id, updated);
-      }
-      return updated;
-    });
-  };
-
-  const activateVvip = () => {
-    if (isInternalMode) return;
-    setIsVvip(true);
-    if (user) {
-      const updatedUser = { ...user, is_vvip: true };
-      setUser(updatedUser);
-      updateUserVvip(user.id, true);
-    }
-  };
-
-  const spendCredits = (cost: number) => {
-    // In internal mode or unlimited or VVIP, never charge credits
-    if (isInternalMode || isUnlimited || isVvip) return true;
-    if (credits >= cost) {
-      setCredits((prev) => {
-        const updated = prev - cost;
-        if (user) {
-          const updatedUser = { ...user, credits: updated };
-          setUser(updatedUser);
-          updateUserCredits(user.id, updated);
-        }
-        return updated;
-      });
-      return true;
-    }
-    return false;
-  };
-
   const refreshUserProfile = async () => {
     if (!user) return;
     try {
@@ -481,10 +435,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUser((prev) =>
       prev
         ? {
-            ...prev,
-            daily_ai_used: res.dailyUsed ?? prev.daily_ai_used,
-            credits: res.creditsRemaining ?? prev.credits,
-          }
+          ...prev,
+          daily_ai_used: res.dailyUsed ?? prev.daily_ai_used,
+          credits: res.creditsRemaining ?? prev.credits,
+        }
         : null
     );
 
@@ -507,9 +461,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setLanguage,
         toggleLanguage,
         t: currentTranslations,
-        addCredits,
-        activateVvip,
-        spendCredits,
         checkAndConsumeAiQuota,
         isPaywallOpen: isInternalMode ? false : isPaywallOpen,
         setPaywallOpen,
