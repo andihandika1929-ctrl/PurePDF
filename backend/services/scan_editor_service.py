@@ -154,11 +154,18 @@ def _analyze_typography_and_color(
     ink_pixels = roi[binary_inv > 0]
     bg_pixels = roi[binary_inv == 0]
 
-    # 1. Sample ink & background colors
+    # 1. Sample ink & background colors (5th percentile = true dark ink core, not gray anti-alias halo)
     if len(ink_pixels) >= 4:
-        ink_b = int(np.percentile(ink_pixels[:, 0], 15))
-        ink_g = int(np.percentile(ink_pixels[:, 1], 15))
-        ink_r = int(np.percentile(ink_pixels[:, 2], 15))
+        ink_b = int(np.percentile(ink_pixels[:, 0], 5))
+        ink_g = int(np.percentile(ink_pixels[:, 1], 5))
+        ink_r = int(np.percentile(ink_pixels[:, 2], 5))
+        # Deepen washed-out neutral gray scan ink so small replaced text matches surrounding dark letters
+        if max(ink_r, ink_g, ink_b) - min(ink_r, ink_g, ink_b) < 28:
+            lum = 0.299 * ink_r + 0.587 * ink_g + 0.114 * ink_b
+            if 48 < lum < 155:
+                ink_r = int(ink_r * 0.65)
+                ink_g = int(ink_g * 0.65)
+                ink_b = int(ink_b * 0.65)
         text_hex = _rgb_to_hex(ink_r, ink_g, ink_b)
     else:
         text_hex = "#141414"
@@ -171,24 +178,47 @@ def _analyze_typography_and_color(
     else:
         bg_hex = "#f4f4f2"
 
-    # 2. Measure true ink vertical span (cap-height) & baseline Y
+    # 2. Connected-component character analysis FIRST so font size uses TRUE median glyph height
+    # (prevents bloated font sizes when a box touches a border or adjacent line!)
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(binary_inv, connectivity=8)
+    char_widths = []
+    char_heights = []
+    char_bottoms = []
+    for lbl in range(1, num_labels):
+        cw = int(stats[lbl, cv2.CC_STAT_WIDTH])
+        ch = int(stats[lbl, cv2.CC_STAT_HEIGHT])
+        cy = int(stats[lbl, cv2.CC_STAT_TOP])
+        area = int(stats[lbl, cv2.CC_STAT_AREA])
+        # Filter out noise specks and giant horizontal/vertical table borders
+        if ch >= 5 and ch <= int(h * 0.98) and cw >= 2 and cw <= int(max(h * 2.5, 45)) and area >= 8:
+            char_widths.append(cw)
+            char_heights.append(ch)
+            char_bottoms.append(cy + ch)
+
     row_counts = np.sum(binary_inv > 0, axis=1)
     active_rows = np.where(row_counts >= max(1, int(roi.shape[1] * 0.015)))[0]
-    if len(active_rows) >= 3:
+
+    if len(char_heights) >= 3:
+        # 75th percentile of glyph heights approximates cap-height accurately (ignoring commas/periods)
+        cap_h = float(np.percentile(char_heights, 75))
+        est_font_px = int(round(cap_h * 1.18))
+        # Median glyph bottom is the true typographic baseline (robust against descenders g/j/p/q/y)
+        baseline_y = y0 + int(round(float(np.median(char_bottoms))))
+        ink_span = max(6, int(round(cap_h)))
+    elif len(active_rows) >= 3:
         ink_top = int(active_rows[0])
         ink_bottom = int(active_rows[-1])
         ink_span = max(6, ink_bottom - ink_top + 1)
-        # Check if text likely contains descenders (g, j, p, q, y)
         has_descender = any(ch in text for ch in "gjpqy,;")
-        # TrueType em-size is roughly 1.25x cap-height (or 1.02x full ascender+descender span)
-        est_font_px = int(round(ink_span * (1.02 if has_descender else 1.22)))
+        est_font_px = int(round(ink_span * (0.95 if has_descender else 1.12)))
         baseline_y = y0 + (ink_bottom - int(round(ink_span * 0.18)) if has_descender else ink_bottom)
     else:
         ink_span = max(8, h)
-        est_font_px = max(9, int(round(h * 0.88)))
+        est_font_px = max(8, int(round(h * 0.82)))
         baseline_y = y0 + int(round(h * 0.82))
 
-    est_font_px = max(8, min(72, est_font_px))
+    # Never let estimated font size exceed 1.15x the box height (prevents giant runaway text)
+    est_font_px = max(7, min(72, min(est_font_px, max(9, int(round(h * 1.15))))))
 
     # 3. Bold detection via distance transform (median half-stroke width / cap-height)
     dist = cv2.distanceTransform(binary_inv, cv2.DIST_L2, 3)
@@ -196,22 +226,12 @@ def _analyze_typography_and_color(
     if len(fg_dists) >= 8:
         stroke_width = float(np.percentile(fg_dists, 75)) * 2.0
         stroke_ratio = stroke_width / float(max(8, ink_span))
-        is_bold = stroke_ratio > 0.165
+        is_bold = stroke_ratio > 0.175
     else:
         is_bold = False
 
     # 4. Font family classification (Monospace vs Serif vs Sans/Carlito)
     font_family = "sans"
-    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(binary_inv, connectivity=8)
-    char_widths = []
-    char_heights = []
-    for lbl in range(1, num_labels):
-        cw = int(stats[lbl, cv2.CC_STAT_WIDTH])
-        ch = int(stats[lbl, cv2.CC_STAT_HEIGHT])
-        area = int(stats[lbl, cv2.CC_STAT_AREA])
-        if ch >= max(5, int(ink_span * 0.4)) and cw >= 2 and area >= 8:
-            char_widths.append(cw)
-            char_heights.append(ch)
 
     if len(char_widths) >= 5:
         w_arr = np.array(char_widths, dtype=np.float32)
@@ -610,48 +630,56 @@ def inpaint_and_render_edits_on_image(
 
         font = _resolve_truetype_font(font_family, font_size, bold=is_bold)
 
-        # Measure exact visual glyph box & ascent for baseline alignment
+        # Use Pillow's exact left-baseline anchor ('ls') so baseline placement has ZERO offset error
         try:
-            tb = font.getbbox(new_text)
+            ascent, descent = font.getmetrics()
+            tb = font.getbbox(new_text, anchor="ls")
             glyph_w = max(4, tb[2] - tb[0])
-            glyph_h = max(4, tb[3] - tb[1])
-            glyph_x_off = -tb[0]
-            glyph_y_off = -tb[1]
-            ascent, _ = font.getmetrics()
+            patch_h = max(ascent + descent + 4, (tb[3] - tb[1]) + 4)
         except Exception:
+            ascent = int(round(font_size * 0.82))
+            descent = int(round(font_size * 0.25))
             glyph_w = max(20, len(new_text) * font_size)
-            glyph_h = font_size
-            glyph_x_off = 0
-            glyph_y_off = 0
-            ascent = int(round(font_size * 0.8))
+            patch_h = ascent + descent + 4
 
-        pad = max(12, int(round(font_size * 0.45)))
-        patch = Image.new("RGBA", (glyph_w + pad * 2, glyph_h + pad * 2), (0, 0, 0, 0))
+        pad = max(10, int(round(font_size * 0.35)))
+        patch = Image.new("RGBA", (glyph_w + pad * 2, patch_h + pad * 2), (0, 0, 0, 0))
         patch_draw = ImageDraw.Draw(patch)
-        patch_draw.text(
-            (pad + glyph_x_off, pad + glyph_y_off),
-            new_text,
-            font=font,
-            fill=(r, g, b, 236),
-        )
+        baseline_in_patch = pad + ascent
+        try:
+            patch_draw.text(
+                (pad, baseline_in_patch),
+                new_text,
+                font=font,
+                anchor="ls",
+                fill=(r, g, b, 248),
+            )
+        except Exception:
+            patch_draw.text(
+                (pad, pad),
+                new_text,
+                font=font,
+                fill=(r, g, b, 248),
+            )
 
         if abs(skew_angle) >= 0.15:
+            orig_h = patch.height
             patch = patch.rotate(-skew_angle, resample=Image.BICUBIC, expand=True)
+            baseline_in_patch += (patch.height - orig_h) // 2
 
-        # Anchor to baselineY if provided, else center vertically inside original bbox
+        # Anchor exact glyph baseline onto original baselineY (zero upward/downward line drift!)
         baseline_pct = edit.get("baselineY")
         if baseline_pct is not None and float(baseline_pct) > 0:
             baseline_px = int(round((float(baseline_pct) / 100.0) * img_h))
-            # Position patch so glyph baseline lands on baseline_px
-            target_y = baseline_px - (pad + ascent + glyph_y_off) + offset_y
+            target_y = baseline_px - baseline_in_patch + offset_y
         else:
-            target_y = int(round(by + (bh - patch.height) / 2.0)) + offset_y
+            target_y = int(round(by + bh * 0.82)) - baseline_in_patch + offset_y
 
         target_x = bx + offset_x - pad
         text_layer.alpha_composite(patch, (target_x, target_y))
 
-    # Subtle Gaussian softness blends digital vector edges into scanned document grain
-    text_layer = text_layer.filter(ImageFilter.GaussianBlur(radius=0.42))
+    # Light Gaussian softness (radius 0.28) preserves crisp small text while blending into scan grain
+    text_layer = text_layer.filter(ImageFilter.GaussianBlur(radius=0.28))
     composited = Image.alpha_composite(base_pil, text_layer).convert("RGB")
     return cv2.cvtColor(np.array(composited), cv2.COLOR_RGB2BGR)
 

@@ -378,20 +378,27 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
           <div className="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1">
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.max(60, z - 15))}
+              onClick={() => setZoom((z) => Math.max(50, z - 25))}
               className="p-1 rounded-sm text-[var(--color-text)] hover:bg-[var(--color-bg)]"
               aria-label="Zoom out"
+              title={isId ? 'Perkecil' : 'Zoom out'}
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="font-mono text-[11px] font-semibold w-10 text-center text-[var(--color-text)]">
-              {zoom}%
-            </span>
             <button
               type="button"
-              onClick={() => setZoom((z) => Math.min(180, z + 15))}
+              onClick={() => setZoom(100)}
+              className="font-mono text-[11px] font-semibold w-11 text-center text-[var(--color-text)] hover:text-[var(--color-accent)]"
+              title={isId ? 'Reset Zoom 100%' : 'Reset Zoom 100%'}
+            >
+              {zoom}%
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.min(250, z + 25))}
               className="p-1 rounded-sm text-[var(--color-text)] hover:bg-[var(--color-bg)]"
               aria-label="Zoom in"
+              title={isId ? 'Perbesar' : 'Zoom in'}
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
@@ -470,7 +477,7 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
       {/* Main Split Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[560px]">
         {/* Left/Center: Interactive Scanned Document Canvas */}
-        <div className="lg:col-span-8 bg-[#EAE8E3] p-4 sm:p-6 overflow-auto max-h-[75vh] flex items-start justify-center relative">
+        <div className="lg:col-span-8 bg-[#EAE8E3] p-4 sm:p-6 overflow-auto max-h-[75vh] relative">
           {isLoadingPage ? (
             <div className="flex flex-col items-center justify-center py-24 gap-3 text-[var(--color-text-muted)]">
               <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent)]" />
@@ -480,11 +487,9 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
             </div>
           ) : (
             <div
-              className="relative shadow-[0_12px_36px_rgba(17,17,16,0.18)] border border-black/15 bg-white select-none transition-all duration-150"
+              className="relative mx-auto shrink-0 shadow-[0_12px_36px_rgba(17,17,16,0.18)] border border-black/15 bg-white select-none transition-[width] duration-150"
               style={{
-                width: `${zoom}%`,
-                maxWidth: zoom <= 100 ? '760px' : 'none',
-                minWidth: '320px',
+                width: `${Math.round(680 * (zoom / 100))}px`,
               }}
             >
               {/* Underlying Scanned Page Image */}
