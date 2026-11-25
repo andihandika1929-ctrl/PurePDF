@@ -10,7 +10,6 @@ import { SeoContentBlock } from '@/components/layout/SeoContentBlock';
 import { DropzoneUploader } from '@/components/workspace/DropzoneUploader';
 import { ToolIcon } from '@/components/ui/ToolIcon';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
-import { SecretAdminDashboard } from '@/components/admin/SecretAdminDashboard';
 
 interface ToolPageProps {
   params: {
@@ -21,19 +20,6 @@ interface ToolPageProps {
 export default function ToolPage({ params }: ToolPageProps) {
   const { language, isInternalMode } = useApp();
   const [isEditorActive, setIsEditorActive] = useState(false);
-
-  const expectedSecret =
-    process.env.NEXT_PUBLIC_ADMIN_SECRET_PATH ||
-    process.env.ADMIN_SECRET_PATH ||
-    '6664dm1n';
-
-  // Secret Admin Route Gateway (Blocked in internal mode)
-  if (params.toolSlug === expectedSecret || params.toolSlug === '6664dm1n') {
-    if (isInternalMode) {
-      notFound();
-    }
-    return <SecretAdminDashboard secretParam={params.toolSlug} />;
-  }
 
   // Auto-redirect deprecated 100KB/200KB routes to unified /compress-pdf
   if (params.toolSlug === 'compress-pdf-100kb' || params.toolSlug === 'compress-pdf-200kb') {

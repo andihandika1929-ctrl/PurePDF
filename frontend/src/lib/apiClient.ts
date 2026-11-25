@@ -38,6 +38,32 @@ export async function checkBackendHealth(): Promise<{
   }
 }
 
+async function parseBackendError(res: Response, fallback: string): Promise<Error> {
+  let message = fallback;
+  try {
+    const text = await res.text();
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        if (typeof parsed?.detail === 'string' && parsed.detail.trim()) {
+          message = parsed.detail.trim();
+        } else if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+          message = parsed.error.trim();
+        }
+      } catch {
+        // Avoid dumping raw HTML error pages from Render/proxies
+        if (!text.trim().startsWith('<') && text.length < 220) {
+          message = text.trim();
+        }
+      }
+    }
+  } catch {}
+
+  const err: any = new Error(message);
+  err.status = res.status;
+  return err;
+}
+
 export async function apiCompressTarget(file: File, targetKb: number): Promise<Blob> {
   const formData = new FormData();
   formData.append('file', file);
@@ -51,8 +77,7 @@ export async function apiCompressTarget(file: File, targetKb: number): Promise<B
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(errText || `Ghostscript compression failed with HTTP ${res.status}`);
+    throw await parseBackendError(res, `Compression failed (HTTP ${res.status}).`);
   }
 
   return await res.blob();
@@ -71,8 +96,7 @@ export async function apiForceUnlock(file: File, password = ''): Promise<Blob> {
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(errText || `Force unlock failed with HTTP ${res.status}`);
+    throw await parseBackendError(res, `Force unlock failed (HTTP ${res.status}).`);
   }
 
   return await res.blob();
@@ -90,8 +114,7 @@ export async function apiPdfToWord(file: File): Promise<Blob> {
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(errText || `High-accuracy Word conversion failed with HTTP ${res.status}`);
+    throw await parseBackendError(res, `High-accuracy Word conversion failed (HTTP ${res.status}).`);
   }
 
   return await res.blob();
@@ -115,8 +138,7 @@ export async function apiAiEditScanned(
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(errText || `AI Edit Scanned failed with HTTP ${res.status}`);
+    throw await parseBackendError(res, `AI Edit Scanned failed (HTTP ${res.status}).`);
   }
 
   return await res.blob();
@@ -134,8 +156,7 @@ export async function apiOcrDetect(file: File): Promise<any> {
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(errText || `OCR detection failed with HTTP ${res.status}`);
+    throw await parseBackendError(res, `OCR detection failed (HTTP ${res.status}).`);
   }
 
   return await res.json();
@@ -154,8 +175,7 @@ export async function apiInpaint(file: File, boxes: any[]): Promise<Blob> {
   });
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(errText || `Neural inpainting failed with HTTP ${res.status}`);
+    throw await parseBackendError(res, `Neural inpainting failed (HTTP ${res.status}).`);
   }
 
   return await res.blob();

@@ -108,7 +108,7 @@ export const DropzoneUploader: React.FC<{
     dailyAiUsed,
     credits,
     openAuthModal,
-    checkAndConsumeAiQuota,
+    refreshUserProfile,
     isInternalMode,
     language,
     t
@@ -123,6 +123,7 @@ export const DropzoneUploader: React.FC<{
   const [isDragging, setIsDragging] = useState(false);
   const [isHoveringDropzone, setIsHoveringDropzone] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isColdStartNotice, setIsColdStartNotice] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -144,6 +145,16 @@ export const DropzoneUploader: React.FC<{
   useEffect(() => {
     onEditorActiveChange?.(isEditorActive);
   }, [isEditorActive, onEditorActiveChange]);
+
+  // Show reassuring Render cold-start notice if a PRO AI server request takes > 4s
+  useEffect(() => {
+    if (!isProcessing || !tool.isPro) {
+      setIsColdStartNotice(false);
+      return;
+    }
+    const timer = setTimeout(() => setIsColdStartNotice(true), 4000);
+    return () => clearTimeout(timer);
+  }, [isProcessing, tool.isPro]);
 
   // Form states for specialized tools
   const [password, setPassword] = useState('');
@@ -265,24 +276,20 @@ export const DropzoneUploader: React.FC<{
       return;
     }
 
-    // PRO AI Tools check
+    // PRO AI Tools pre-check (actual atomic credit deduction is enforced server-side in FastAPI!)
     if (tool.isPro && !isInternalMode) {
       if (!user) {
         openAuthModal('login');
         return;
       }
       const cost = tool.creditCost || 2;
-      const quotaRes = await checkAndConsumeAiQuota(cost);
-      if (!quotaRes.allowed) {
+      const hasDailyVvip = isVvip && dailyAiUsed < 15;
+      if (!isUnlimited && !hasDailyVvip && credits < cost) {
         setActiveProToolName(toolName);
         setPaywallOpen(true);
         return;
       }
-      const creditsCharged =
-        quotaRes.quotaType === 'free_credits' || quotaRes.quotaType === 'vvip_backup'
-          ? cost
-          : 0;
-      recordUsageLog(tool.slug, true, creditsCharged).catch(console.error);
+      recordUsageLog(tool.slug, true, isUnlimited || hasDailyVvip ? 0 : cost).catch(console.error);
     } else {
       recordUsageLog(tool.slug, false, 0).catch(console.error);
     }
@@ -297,24 +304,37 @@ export const DropzoneUploader: React.FC<{
     const baseName = file?.name ? file.name.replace(/\.[^/.]+$/, '') : 'document';
 
     try {
-      // 0. PRO AI Tools Backend Execution
+      // 0. PRO AI Tools Backend Execution (server verifies JWT & deducts credits atomically)
       if (tool.slug === 'force-unlock-pdf') {
         setStatusMessage(
           isId
-            ? 'Menghapus batasan izin dokumen...'
-            : 'Stripping owner security restrictions...'
+            ? 'Menghubungkan ke server AI & melepas proteksi dokumen...'
+            : 'Connecting to AI server & stripping security restrictions...'
         );
         setProgress(40);
         try {
           const blob = await apiForceUnlock(file!, password);
           setProgress(100);
+          refreshUserProfile().catch(() => {});
           handoffDownload(blob, `${baseName}_unlocked.pdf`, 'application/pdf');
           return;
         } catch (backendErr: any) {
+          if (backendErr?.status === 401) {
+            openAuthModal('login');
+            throw new Error(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+          }
+          if (backendErr?.status === 402) {
+            setActiveProToolName(toolName);
+            setPaywallOpen(true);
+            throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
+          }
+          if (backendErr?.status === 413) {
+            throw new Error(backendErr.message);
+          }
           throw new Error(
             isId
-              ? `⚠️ Layanan pemrosesan dokumen belum aktif di ${BACKEND_URL}. Silakan mulai server backend Python.`
-              : `⚠️ Document processing service is offline at ${BACKEND_URL}. Please start the backend service.`
+              ? 'Server AI sedang sibuk atau bangun dari mode tidur. Mohon coba beberapa detik lagi.'
+              : 'The AI server is currently waking up or busy. Please try again in a few seconds.'
           );
         }
       }
@@ -322,13 +342,14 @@ export const DropzoneUploader: React.FC<{
       if (tool.slug === 'high-accuracy-pdf-to-word') {
         setStatusMessage(
           isId
-            ? 'Mengonversi ke Word presisi tinggi...'
-            : 'Converting to Word with neural layout preservation...'
+            ? 'Menghubungkan ke server AI & mengonversi ke Word presisi tinggi...'
+            : 'Connecting to AI server & converting to high-accuracy Word...'
         );
         setProgress(40);
         try {
           const blob = await apiPdfToWord(file!);
           setProgress(100);
+          refreshUserProfile().catch(() => {});
           handoffDownload(
             blob,
             `${baseName}_high_accuracy.docx`,
@@ -336,10 +357,22 @@ export const DropzoneUploader: React.FC<{
           );
           return;
         } catch (backendErr: any) {
+          if (backendErr?.status === 401) {
+            openAuthModal('login');
+            throw new Error(isId ? 'Sesi login Anda habis. Silakan masuk kembali.' : 'Your session expired. Please sign in again.');
+          }
+          if (backendErr?.status === 402) {
+            setActiveProToolName(toolName);
+            setPaywallOpen(true);
+            throw new Error(isId ? 'Kredit atau kuota harian AI Anda tidak mencukupi.' : 'Insufficient AI credits or daily quota.');
+          }
+          if (backendErr?.status === 413) {
+            throw new Error(backendErr.message);
+          }
           throw new Error(
             isId
-              ? `⚠️ Layanan pemrosesan dokumen belum aktif di ${BACKEND_URL}. Silakan mulai server backend Python.`
-              : `⚠️ Document processing service is offline at ${BACKEND_URL}. Please start the backend service.`
+              ? 'Server AI sedang sibuk atau bangun dari mode tidur. Mohon coba beberapa detik lagi.'
+              : 'The AI server is currently waking up or busy. Please try again in a few seconds.'
           );
         }
       }
@@ -1030,6 +1063,17 @@ export const DropzoneUploader: React.FC<{
                         transition={SPRINGS.mechanical}
                       />
                     </div>
+                    {isColdStartNotice && (
+                      <motion.p
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="text-xs font-mono text-[var(--color-text-muted)] pt-1"
+                      >
+                        {isId
+                          ? 'Server AI sedang bangun dari mode tidur (cold-start ~30–50 detik pada permintaan pertama). Mohon jangan tutup halaman ini.'
+                          : 'Waking up AI server from cold-start (~30–50s on first request). Please keep this tab open.'}
+                      </motion.p>
+                    )}
                   </div>
                 </div>
 

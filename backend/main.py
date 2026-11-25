@@ -32,8 +32,34 @@ app = FastAPI(
 )
 
 # Strict CORS whitelist from CORS_ORIGINS env (never wildcard '*' with credentials)
-raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+raw_origins = os.getenv(
+    "CORS_ORIGINS",
+    "https://purepdf-seven.vercel.app,http://localhost:3000,http://127.0.0.1:3000",
+)
 allowed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip() and origin.strip() != "*"]
+
+# Hard file-size limit to protect Render Free Tier (512MB RAM) from OOM crashes
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
+
+async def read_upload_with_limit(upload: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
+    """Stream-read an uploaded file with a strict byte ceiling to prevent OOM."""
+    chunks = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)  # 1 MB chunks
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds the {MAX_UPLOAD_MB} MB server limit. Please compress or split it first.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,7 +101,7 @@ async def api_compress_target(
         )
 
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file)
         compressed_bytes = compress_pdf_to_target(content, target_kb=target_kb)
 
         filename = file.filename or "document.pdf"
@@ -102,7 +128,7 @@ async def api_force_unlock(
     """
     await consume_ai_quota_server(current_user["id"], cost=2)
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file)
         unlocked_bytes = force_unlock_pdf(content, password=password)
 
         filename = file.filename or "document.pdf"
@@ -126,7 +152,7 @@ async def api_pdf_to_word(
     """
     await consume_ai_quota_server(current_user["id"], cost=2)
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file)
         docx_bytes = convert_pdf_to_word_docx(content)
 
         filename = file.filename or "document.pdf"
@@ -149,7 +175,7 @@ async def api_ocr_detect(
     Detect text bounding boxes and line coordinates in scanned documents.
     """
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file)
         regions = detect_text_regions(content)
         return {"success": True, "regions": regions, "count": len(regions)}
     except Exception as e:
@@ -165,7 +191,7 @@ async def api_inpaint(
     Erase text inside image/scanned PDF using OpenCV Telea Inpainting algorithm.
     """
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file)
         box_list = json.loads(boxes)
         inpainted_bytes = inpaint_text_regions(content, box_list)
 
@@ -186,7 +212,7 @@ async def api_font_match(
     Match font family, size, and background color using Google Gemini Vision API.
     """
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file)
         match_info = neural_font_match(content, text)
         return {"success": True, "typography": match_info}
     except Exception as e:
@@ -205,7 +231,7 @@ async def api_ai_edit_scanned(
     """
     await consume_ai_quota_server(current_user["id"], cost=2)
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file)
         box_list = []
         if boxes:
             try:
@@ -242,7 +268,7 @@ async def api_scan_editor(
     with sampled authentic bgColor, textColor, fontSize, and percentage bounding boxes.
     """
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file)
         data = scan_document_for_editor(content, page_index=page_index)
         return JSONResponse(content=data)
     except Exception as e:
