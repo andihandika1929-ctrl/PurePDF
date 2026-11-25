@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import { Space_Grotesk, DM_Sans, IBM_Plex_Mono } from 'next/font/google';
 import '@/styles/globals.css';
 import { MotionProviders } from '@/components/providers/MotionProviders';
@@ -100,6 +101,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const adsenseClientId = (process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID || '').trim();
+
   return (
     <html
       lang="en"
@@ -107,6 +110,15 @@ export default function RootLayout({
       className={`${spaceGrotesk.variable} ${dmSans.variable} ${ibmPlexMono.variable}`}
     >
       <body className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] font-sans transition-colors duration-200 selection:bg-[var(--color-accent)] selection:text-[var(--color-on-accent)] bg-dot-grid">
+        {adsenseClientId && (
+          <Script
+            id="google-adsense-script"
+            async
+            strategy="afterInteractive"
+            src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClientId}`}
+            crossOrigin="anonymous"
+          />
+        )}
         <MotionProviders>
           <AppProvider>
             <div className="flex flex-col min-h-screen relative overflow-x-hidden">

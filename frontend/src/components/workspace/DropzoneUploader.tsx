@@ -8,7 +8,8 @@ import { useApp } from '@/context/AppContext';
 import { SPRINGS, EASES } from '@/lib/motion';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { CircularProgressRing, AnimatedCheckmark } from '@/components/ui/MotionStatus';
+import { CircularProgressRing } from '@/components/ui/MotionStatus';
+import { AdSenseCountdownGate } from './AdSenseCountdownGate';
 import { PageGridBoard } from './PageGridBoard';
 import { CompressOptions, AdvancedCompressSettings } from './CompressOptions';
 import { SignPdfPanel, SignPdfOptions } from './SignPdfPanel';
@@ -1090,103 +1091,26 @@ export const DropzoneUploader: React.FC<{
               </motion.div>
             )}
 
-            {/* Inline Success State: SVG-Draw Checkmark + Green Download Button */}
+            {/* Inline 3-Tier Completion & AdSense Countdown Gate */}
             {!isProcessing && completedResult && (
-              <motion.div
-                key="success-panel"
-                initial={{ opacity: 0, y: 10, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={SPRINGS.panel}
-                className="p-6 sm:p-8 rounded-md bg-[var(--color-bg)] border border-[var(--color-success)]/40 text-center space-y-6"
-              >
-                <div className="flex flex-col items-center space-y-3">
-                  <AnimatedCheckmark size={72} />
-                  <div className="space-y-1">
-                    <span className="font-mono text-[11px] uppercase tracking-[0.06em] text-[var(--color-success)] font-semibold">
-                      {isId ? 'PROSES SELESAI · 0 RETENTION' : 'COMPLETE · ZERO RETENTION'}
-                    </span>
-                    <h3 className="font-display text-2xl font-bold tracking-[-0.025em] text-[var(--color-text)]">
-                      {isId ? 'Dokumen Siap Diunduh' : 'Document Ready to Download'}
-                    </h3>
-                  </div>
-                </div>
-
-                {/* Output Telemetry Box */}
-                <div className="max-w-md mx-auto p-4 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-between gap-3 text-left">
-                  <div className="truncate">
-                    <p className="font-display text-sm font-semibold text-[var(--color-text)] truncate">
-                      {completedResult.filename}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-[var(--color-text-muted)] mt-0.5">
-                      <span>{formatFileSize(completedResult.fileSize)}</span>
-                      {completedResult.originalSize > completedResult.fileSize && (
-                        <span className="inline-flex items-center gap-0.5 text-[var(--color-success)] font-semibold">
-                          <ArrowDown className="w-3 h-3" />
-                          {Math.round((1 - completedResult.fileSize / completedResult.originalSize) * 100)}%{' '}
-                          {isId ? 'lebih hemat' : 'smaller'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <span className="font-mono text-[10px] uppercase tracking-[0.06em] px-2 py-1 rounded-sm bg-[var(--color-surface-subtle)] border border-[var(--color-border)] text-[var(--color-text-muted)] shrink-0">
-                    {completedResult.mimeType.split('/')[1] || 'PDF'}
-                  </span>
-                </div>
-
-                {/* Primary Green Download Button + Secondary Reset */}
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
-                  <motion.button
-                    type="button"
-                    whileHover={{ y: -1 }}
-                    whileTap={{ scale: 0.97 }}
-                    transition={SPRINGS.tactile}
-                    onClick={triggerDirectDownload}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 h-12 px-8 rounded-full bg-[var(--color-success)] hover:brightness-110 text-white font-display font-semibold text-sm shadow-card-elevated transition-[filter]"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>
-                      {hasDownloaded
-                        ? isId
-                          ? 'Unduh Lagi'
-                          : 'Download Again'
-                        : isId
-                        ? 'Download File Sekarang'
-                        : 'Download Processed File'}
-                    </span>
-                  </motion.button>
-
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.97 }}
-                    transition={SPRINGS.tactile}
-                    onClick={() => {
-                      setFile(null);
-                      setImageFiles([]);
-                      setAdditionalFiles([]);
-                      setTemplateFile(null);
-                      setSecondFile(null);
-                      setCompletedResult(null);
-                      setHasDownloaded(false);
-                      setErrorMessage(null);
-                    }}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 h-12 px-5 rounded-full bg-[var(--color-surface)] hover:bg-[var(--color-surface-subtle)] text-[var(--color-text)] border border-[var(--color-border)] font-medium text-xs transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>{isId ? 'Proses File Lain' : 'Process Another File'}</span>
-                  </motion.button>
-                </div>
-
-                {hasDownloaded && (
-                  <motion.p
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="font-mono text-xs text-[var(--color-success)]"
-                  >
-                    ✓ {t.download.downloadStarted}
-                  </motion.p>
-                )}
-              </motion.div>
+              <AdSenseCountdownGate
+                filename={completedResult.filename}
+                mimeType={completedResult.mimeType}
+                fileSize={completedResult.fileSize}
+                originalSize={completedResult.originalSize}
+                hasDownloaded={hasDownloaded}
+                onDownload={triggerDirectDownload}
+                onReset={() => {
+                  setFile(null);
+                  setImageFiles([]);
+                  setAdditionalFiles([]);
+                  setTemplateFile(null);
+                  setSecondFile(null);
+                  setCompletedResult(null);
+                  setHasDownloaded(false);
+                  setErrorMessage(null);
+                }}
+              />
             )}
           </AnimatePresence>
 

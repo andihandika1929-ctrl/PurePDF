@@ -27,9 +27,9 @@ import {
 export default function DownloadPage({ params }: { params: { jobId: string } }) {
   const searchParams = useSearchParams();
   const toolSlug = searchParams.get('tool') || 'compress-pdf';
-  const { isVvip, language, t } = useApp();
+  const { isVvipActive, instantDownload, language, t } = useApp();
 
-  const [secondsLeft, setSecondsLeft] = useState(isVvip ? 0 : 12);
+  const [secondsLeft, setSecondsLeft] = useState(instantDownload ? 0 : 12);
   const [isDownloaded, setIsDownloaded] = useState(false);
   const [job, setJob] = useState<ProcessedJob | null>(null);
   const isId = language === 'id';
@@ -42,9 +42,9 @@ export default function DownloadPage({ params }: { params: { jobId: string } }) 
     }
   }, [params.jobId]);
 
-  // Countdown timer logic (12s AdSense buffer, 0s if VVIP)
+  // Countdown timer logic (12s for 0-credit guest/free, 0s if credits > 0 or VVIP)
   useEffect(() => {
-    if (isVvip) {
+    if (instantDownload) {
       setSecondsLeft(0);
       return;
     }
@@ -62,7 +62,7 @@ export default function DownloadPage({ params }: { params: { jobId: string } }) 
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [secondsLeft, isVvip]);
+  }, [secondsLeft, instantDownload]);
 
   // Trigger genuine download of processed Blob
   const handleDownload = async () => {
@@ -171,7 +171,7 @@ export default function DownloadPage({ params }: { params: { jobId: string } }) 
 
         {/* Heading & Status */}
         <div className="space-y-2">
-          {isVvip && (
+          {isVvipActive && (
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold font-mono">
               <Crown className="w-3.5 h-3.5 fill-current" />
               <span>{t.download.vvipBypassed}</span>

@@ -18,8 +18,11 @@ import {
 interface AppContextType {
   credits: number;
   isVvip: boolean;
+  isVvipActive: boolean;
   isUnlimited: boolean;
   isInternalMode: boolean;
+  showAds: boolean;
+  instantDownload: boolean;
   dailyAiUsed: number;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
@@ -155,13 +158,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             subscribeToProfile(session.user.id);
           });
         } else {
-          // Check localStorage for offline demo user
-          const mockUser = localStorage.getItem('purepdf_mock_user');
-          if (mockUser) {
-            try {
-              applyProfile(JSON.parse(mockUser));
-            } catch { }
-          }
+          // Strictly zero-trust: never restore credits/VVIP from localStorage
+          applyProfile(null);
         }
         setAuthLoading(false);
       });
@@ -447,13 +445,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const currentTranslations = TRANSLATIONS[language] || TRANSLATIONS.en;
 
+  // Centralized 3-Tier Monetization Rules (Single Source of Truth for all 31 tools)
+  // Tier 1 (Guest / 0 credits): showAds = true,  instantDownload = false (12s countdown)
+  // Tier 2 (Credits > 0):       showAds = true,  instantDownload = true  (0s instant)
+  // Tier 3 (Active VVIP/Unl):   showAds = false, instantDownload = true  (0s + 100% ad-free)
+  const isVvipActive = Boolean(
+    isInternalMode ||
+      isUnlimited ||
+      (isVvip && (!user?.vvip_expires_at || new Date(user.vvip_expires_at) > new Date()))
+  );
+  const showAds = !isVvipActive;
+  const instantDownload = isVvipActive || credits > 0;
+
   return (
     <AppContext.Provider
       value={{
         credits,
         isVvip,
+        isVvipActive,
         isUnlimited,
         isInternalMode,
+        showAds,
+        instantDownload,
         dailyAiUsed,
         theme,
         toggleTheme,
