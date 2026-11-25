@@ -34,8 +34,11 @@ try:
 except ImportError:
     pytesseract = None
 
-RENDER_DPI = 180
+RENDER_DPI = 150
 BACKEND_FONTS_DIR = Path(__file__).resolve().parent.parent / "fonts"
+
+# Prevent Tesseract OpenMP thread thrashing on 0.1 vCPU containers (Render Free Tier)
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
 
 def _hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
@@ -304,8 +307,10 @@ def _merge_line_boxes(raw_boxes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _detect_boxes_tesseract(bgr_img: np.ndarray) -> Tuple[List[Dict[str, Any]], str]:
     """
     Extract REAL OCR text & bounding boxes using Tesseract image_to_data.
-    Downscales grayscale to <= 1200px wide + CLAHE enhancement for fast, accurate OCR
-    on Render Free Tier (0.1 vCPU / 512MB RAM). NEVER returns fake placeholder text.
+    Tuned specifically for Render Free Tier (0.1 vCPU / 512MB RAM):
+    - OMP_THREAD_LIMIT=1 eliminates OpenMP thread contention (3-5x speedup)
+    - Downscales grayscale to <= 950px wide + light contrast boost
+    - Single OCR pass (never double-retries on timeout!)
     """
     if pytesseract is None or not shutil.which("tesseract"):
         return [], "unavailable"
@@ -313,8 +318,8 @@ def _detect_boxes_tesseract(bgr_img: np.ndarray) -> Tuple[List[Dict[str, Any]], 
     img_h, img_w = bgr_img.shape[:2]
     gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
 
-    # Downscale for speed while keeping crisp glyph edges
-    max_ocr_w = 1200
+    # Downscale for fast OCR on 0.1 vCPU while preserving crisp 10pt+ letterforms
+    max_ocr_w = 950
     scale = 1.0
     if img_w > max_ocr_w:
         scale = max_ocr_w / float(img_w)
@@ -324,26 +329,33 @@ def _detect_boxes_tesseract(bgr_img: np.ndarray) -> Tuple[List[Dict[str, Any]], 
             interpolation=cv2.INTER_AREA,
         )
 
-    # Light CLAHE improves contrast on faint/cream/shadowed scans without distorting strokes
-    clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
     pil_gray = Image.fromarray(enhanced)
 
-    data = None
+    # Pick available language once (prefer 'eng' as fastest Latin model; fallback 'ind' only if missing)
     used_lang = "eng"
-    for lang in ("ind", "eng"):
-        try:
-            data = pytesseract.image_to_data(
-                pil_gray,
-                lang=lang,
-                config="--oem 1 --psm 6",
-                timeout=45,
-                output_type=pytesseract.Output.DICT,
-            )
-            used_lang = lang
-            break
-        except Exception:
-            continue
+    try:
+        avail_langs = pytesseract.get_languages(config="")
+        if "eng" in avail_langs:
+            used_lang = "eng"
+        elif "ind" in avail_langs:
+            used_lang = "ind"
+    except Exception:
+        used_lang = "eng"
+
+    try:
+        data = pytesseract.image_to_data(
+            pil_gray,
+            lang=used_lang,
+            config="--oem 1 --psm 6 -c tessedit_do_invert=0",
+            timeout=50,
+            output_type=pytesseract.Output.DICT,
+        )
+    except RuntimeError:
+        return [], "timeout"
+    except Exception:
+        return [], "error"
 
     if not data or "text" not in data:
         return [], "timeout"

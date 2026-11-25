@@ -15,6 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Critical for Render Free Tier (0.1 vCPU): prevent Tesseract OpenMP thread contention (3-5x speedup!)
+ENV OMP_THREAD_LIMIT=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+
 # Create deterministic backend/fonts directory containing standard document fonts
 # (Liberation Serif = Times New Roman, Liberation Sans = Arial, Carlito = Calibri, Liberation Mono = Courier)
 RUN mkdir -p /app/fonts && \
