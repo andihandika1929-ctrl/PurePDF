@@ -38,23 +38,40 @@ async function getAuthHeaders(forceRefresh = false): Promise<Record<string, stri
 
 async function fetchWithAuthRetry(
   url: string,
-  buildBody: () => FormData
+  buildBody: () => FormData,
+  timeoutMs = 75000
 ): Promise<Response> {
+  const runFetch = async (headers: Record<string, string>) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, {
+        method: 'POST',
+        headers,
+        body: buildBody(),
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        const timeoutErr: any = new Error(
+          'Server AI membutuhkan waktu terlalu lama (>75 detik). Coba ulangi lagi — server Render mungkin baru selesai bangun.'
+        );
+        timeoutErr.status = 504;
+        throw timeoutErr;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   const headers = await getAuthHeaders(false);
-  let res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: buildBody(),
-  });
+  let res = await runFetch(headers);
 
   if (res.status === 401) {
     const refreshedHeaders = await getAuthHeaders(true);
     if (refreshedHeaders.Authorization && refreshedHeaders.Authorization !== headers.Authorization) {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: refreshedHeaders,
-        body: buildBody(),
-      });
+      res = await runFetch(refreshedHeaders);
     }
   }
 
@@ -219,6 +236,7 @@ export interface ScanEditorBlock {
   letterSpacing?: number; // letter spacing in px
   fontCategory?: 'formal_serif' | 'modern_sans' | 'condensed' | 'monospace' | 'slab_serif' | 'script' | string;
   fontFamily: string;
+  skewAngle?: number;
   isUnderline?: boolean; // underline detection from backend / toggled by user
   isModified?: boolean;
   isDeleted?: boolean;
@@ -255,6 +273,7 @@ export interface ScanEditItem {
   fontFamily?: 'serif' | 'sans' | 'mono';
   isBold?: boolean;
   textColor?: string;
+  skewAngle?: number;
 }
 
 export async function apiScanEditor(

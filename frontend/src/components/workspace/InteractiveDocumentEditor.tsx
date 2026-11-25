@@ -56,6 +56,7 @@ interface BlockEditState {
   isBold: boolean;
   textColor: string;
   autoTextColor: string;
+  skewAngle: number;
 }
 
 function normalizeFontChoice(family?: string, category?: string): FontFamilyChoice {
@@ -148,6 +149,7 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
       isBold: Boolean(block.isBold),
       textColor: block.textColor || '#1A1A1A',
       autoTextColor: block.textColor || '#1A1A1A',
+      skewAngle: Number(block.skewAngle || 0),
     };
   };
 
@@ -249,6 +251,7 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
       fontFamily: item.fontFamily,
       isBold: item.isBold,
       textColor: item.textColor,
+      skewAngle: item.skewAngle,
     }));
 
     try {
@@ -295,6 +298,7 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
     : normalizeFontChoice(selectedBlock?.fontFamily, selectedBlock?.fontCategory);
   const inspectorIsBold = selectedEdit ? selectedEdit.isBold : Boolean(selectedBlock?.isBold);
   const inspectorColor = selectedEdit ? selectedEdit.textColor : selectedBlock?.textColor || '#1A1A1A';
+  const inspectorSkew = selectedEdit ? selectedEdit.skewAngle : Number(selectedBlock?.skewAngle || 0);
 
   return (
     <div className="w-full rounded-md border border-[var(--color-border-strong)] bg-[var(--color-surface)] overflow-hidden shadow-card-elevated">
@@ -542,7 +546,7 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
                             fontFamily: fontChoiceToCss(edit.fontFamily),
                             fontWeight: edit.isBold ? 700 : 400,
                             fontSize: `clamp(8px, ${(edit.fontSize / (activeScan.pixelWidth || 1200)) * 100}cqw, 48px)`,
-                            transform: `translate(${edit.offsetX * 0.5}px, ${edit.offsetY * 0.5}px)`,
+                            transform: `translate(${edit.offsetX * 0.5}px, ${edit.offsetY * 0.5}px) rotate(${edit.skewAngle}deg)`,
                           }}
                         >
                           {edit.newText}
@@ -799,6 +803,36 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
                         className="w-full accent-[var(--color-accent)] cursor-pointer"
                       />
                     </div>
+                  </div>
+
+                  {/* Tilt / Skew Angle Control */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label
+                        htmlFor="scan-skew-angle"
+                        className="font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]"
+                      >
+                        {isId ? 'Kemiringan Scan (Auto)' : 'Scan Tilt Angle (Auto)'}
+                      </label>
+                      <span className="font-mono text-[11px] font-semibold text-[var(--color-text)]">
+                        {inspectorSkew > 0 ? `+${inspectorSkew.toFixed(1)}` : inspectorSkew.toFixed(1)}°
+                      </span>
+                    </div>
+                    <input
+                      id="scan-skew-angle"
+                      type="range"
+                      min={-5}
+                      max={5}
+                      step={0.1}
+                      value={inspectorSkew}
+                      onChange={(e) =>
+                        updateSelectedEdit({
+                          mode: 'replace',
+                          skewAngle: Number(e.target.value),
+                        })
+                      }
+                      className="w-full accent-[var(--color-accent)] cursor-pointer"
+                    />
                   </div>
 
                   {/* Auto Ink Color Picker */}

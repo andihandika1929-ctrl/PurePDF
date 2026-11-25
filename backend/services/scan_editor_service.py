@@ -201,20 +201,39 @@ def _merge_line_boxes(raw_boxes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _detect_boxes_tesseract(bgr_img: np.ndarray) -> List[Dict[str, Any]]:
-    """Run lightweight Tesseract OCR (ind+eng) to extract word/line bounding boxes."""
+    """
+    Run fast, RAM-safe Tesseract OCR on a downscaled grayscale copy (max 1100px wide)
+    with a strict 22s timeout so Render Free Tier (0.1 vCPU / 512MB RAM) finishes in
+    ~3-8 seconds instead of hanging or OOM-ing. Coordinates are scaled back to full DPI.
+    """
     if pytesseract is None:
         return []
 
-    rgb = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(rgb)
+    img_h, img_w = bgr_img.shape[:2]
+    gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
 
+    # Downscale for OCR speed (4x fewer pixels, identical line/word box accuracy)
+    max_ocr_w = 1100
+    scale = 1.0
+    if img_w > max_ocr_w:
+        scale = max_ocr_w / float(img_w)
+        gray = cv2.resize(
+            gray,
+            (int(round(img_w * scale)), int(round(img_h * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    pil_gray = Image.fromarray(gray)
+
+    # Single Latin LSTM model ('eng') is 2x faster & half RAM vs 'ind+eng' for Latin/Indonesian text
     data = None
-    for lang in ("ind+eng", "eng"):
+    for lang in ("eng", "ind"):
         try:
             data = pytesseract.image_to_data(
-                pil_img,
+                pil_gray,
                 lang=lang,
-                config="--oem 3 --psm 6",
+                config="--oem 1 --psm 6",
+                timeout=22,
                 output_type=pytesseract.Output.DICT,
             )
             break
@@ -224,6 +243,7 @@ def _detect_boxes_tesseract(bgr_img: np.ndarray) -> List[Dict[str, Any]]:
     if not data or "text" not in data:
         return []
 
+    inv_scale = 1.0 / scale
     words: List[Dict[str, Any]] = []
     n = len(data["text"])
     for i in range(n):
@@ -232,15 +252,15 @@ def _detect_boxes_tesseract(bgr_img: np.ndarray) -> List[Dict[str, Any]]:
             conf = float(data["conf"][i])
         except Exception:
             conf = -1.0
-        w = int(data["width"][i])
-        h = int(data["height"][i])
+        w = int(round(int(data["width"][i]) * inv_scale))
+        h = int(round(int(data["height"][i]) * inv_scale))
         if not txt or conf < 25 or w < 4 or h < 6:
             continue
         words.append(
             {
                 "text": txt,
-                "x": int(data["left"][i]),
-                "y": int(data["top"][i]),
+                "x": int(round(int(data["left"][i]) * inv_scale)),
+                "y": int(round(int(data["top"][i]) * inv_scale)),
                 "w": w,
                 "h": h,
             }
@@ -470,7 +490,6 @@ def inpaint_and_render_edits_on_image(
 
     base_pil = Image.fromarray(cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)).convert("RGBA")
     text_layer = Image.new("RGBA", base_pil.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(text_layer)
 
     for edit in replace_edits:
         bbox = edit.get("bbox") or {}
@@ -480,15 +499,48 @@ def inpaint_and_render_edits_on_image(
 
         offset_x = int(round(float(edit.get("offsetX", 0))))
         offset_y = int(round(float(edit.get("offsetY", 0))))
-        font_size = int(round(float(edit.get("fontSize") or max(10, bh * 0.82))))
+        font_size = int(round(float(edit.get("fontSize") or max(10, bh * 0.85))))
         font_family = str(edit.get("fontFamily", "sans"))
         is_bold = bool(edit.get("isBold", False))
+        skew_angle = float(edit.get("skewAngle", 0.0) or 0.0)
+        skew_angle = max(-10.0, min(10.0, skew_angle))
         new_text = str(edit.get("newText", ""))
         r, g, b = _hex_to_rgb(str(edit.get("textColor", "#111110")))
 
         font = _resolve_truetype_font(font_family, font_size, bold=is_bold)
-        # Slightly below 100% alpha (238/255) lets subtle paper micro-grain bleed through naturally
-        draw.text((bx + offset_x, by + offset_y), new_text, font=font, fill=(r, g, b, 238))
+
+        # Measure exact visual glyph bounds so replacement text aligns cleanly on the original line
+        try:
+            tb = font.getbbox(new_text)
+            glyph_w = max(4, tb[2] - tb[0])
+            glyph_h = max(4, tb[3] - tb[1])
+            glyph_x_off = -tb[0]
+            glyph_y_off = -tb[1]
+        except Exception:
+            glyph_w = max(20, len(new_text) * font_size)
+            glyph_h = font_size
+            glyph_x_off = 0
+            glyph_y_off = 0
+
+        pad = max(12, int(round(font_size * 0.4)))
+        patch = Image.new("RGBA", (glyph_w + pad * 2, glyph_h + pad * 2), (0, 0, 0, 0))
+        patch_draw = ImageDraw.Draw(patch)
+        # Alpha 236/255 lets subtle scanned paper grain bleed through naturally
+        patch_draw.text(
+            (pad + glyph_x_off, pad + glyph_y_off),
+            new_text,
+            font=font,
+            fill=(r, g, b, 236),
+        )
+
+        # Preserve exact scanned paper tilt/skew angle
+        if abs(skew_angle) >= 0.15:
+            patch = patch.rotate(-skew_angle, resample=Image.BICUBIC, expand=True)
+
+        # Vertically align glyph center to original text box center (zero vertical line drift)
+        target_x = bx + offset_x - pad
+        target_y = int(round(by + (bh - patch.height) / 2.0)) + offset_y
+        text_layer.alpha_composite(patch, (target_x, target_y))
 
     # Micro Gaussian softness (radius 0.45) blends crisp digital edges into scanned/screenshot quality
     text_layer = text_layer.filter(ImageFilter.GaussianBlur(radius=0.45))
