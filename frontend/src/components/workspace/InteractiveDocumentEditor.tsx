@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ScanEditorBlock,
   ScanEditorResponse,
@@ -40,7 +40,7 @@ interface InteractiveDocumentEditorProps {
   onDownload: (blob: Blob, filename: string) => void;
 }
 
-type FontFamilyChoice = 'serif' | 'sans' | 'mono';
+type FontFamilyChoice = 'serif' | 'sans' | 'carlito' | 'mono';
 
 interface BlockEditState {
   pageIndex: number;
@@ -56,20 +56,24 @@ interface BlockEditState {
   isBold: boolean;
   textColor: string;
   autoTextColor: string;
+  baselineY?: number;
   skewAngle: number;
 }
 
 function normalizeFontChoice(family?: string, category?: string): FontFamilyChoice {
   const raw = `${family || ''} ${category || ''}`.toLowerCase();
   if (raw.includes('mono') || raw.includes('courier') || raw.includes('consolas')) return 'mono';
-  if (raw.includes('serif') || raw.includes('times') || raw.includes('georgia')) return 'serif';
+  if (raw.includes('carlito') || raw.includes('calibri')) return 'carlito';
+  if (raw.includes('serif') && !raw.includes('sans')) return 'serif';
+  if (raw.includes('times') || raw.includes('georgia')) return 'serif';
   return 'sans';
 }
 
 function fontChoiceToCss(choice: FontFamilyChoice): string {
-  if (choice === 'serif') return "'Times New Roman', Georgia, serif";
-  if (choice === 'mono') return "'IBM Plex Mono', 'Courier New', monospace";
-  return "'DM Sans', Arial, Helvetica, sans-serif";
+  if (choice === 'serif') return "'Times New Roman', 'Liberation Serif', Georgia, serif";
+  if (choice === 'mono') return "'Courier New', 'Liberation Mono', monospace";
+  if (choice === 'carlito') return "'Calibri', 'Carlito', 'DM Sans', sans-serif";
+  return "Arial, 'Liberation Sans', Helvetica, sans-serif";
 }
 
 export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps> = ({
@@ -102,6 +106,27 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
 
   const activeScan = pagesCache[currentPage] || initialScan;
   const totalPages = activeScan.totalPages || 1;
+
+  // Pixel-exact synchronization between preview <img> and original backend pixelWidth
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [renderedWidth, setRenderedWidth] = useState<number>(700);
+
+  useEffect(() => {
+    const el = imgRef.current;
+    if (!el) return;
+    const syncWidth = () => {
+      if (el.clientWidth > 0) setRenderedWidth(el.clientWidth);
+    };
+    syncWidth();
+    const ro = new ResizeObserver(syncWidth);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeScan.image, zoom]);
+
+  const displayScale = useMemo(() => {
+    const naturalW = activeScan.pixelWidth || 1200;
+    return renderedWidth > 0 && naturalW > 0 ? renderedWidth / naturalW : 0.5;
+  }, [renderedWidth, activeScan.pixelWidth]);
 
   // Show reassuring cold-start notice if export or page scan takes > 4s
   useEffect(() => {
@@ -149,6 +174,7 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
       isBold: Boolean(block.isBold),
       textColor: block.textColor || '#1A1A1A',
       autoTextColor: block.textColor || '#1A1A1A',
+      baselineY: block.baselineY,
       skewAngle: Number(block.skewAngle || 0),
     };
   };
@@ -251,6 +277,7 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
       fontFamily: item.fontFamily,
       isBold: item.isBold,
       textColor: item.textColor,
+      baselineY: item.baselineY,
       skewAngle: item.skewAngle,
     }));
 
@@ -462,8 +489,13 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
             >
               {/* Underlying Scanned Page Image */}
               <img
+                ref={imgRef}
                 src={activeScan.image}
                 alt={`Scanned page ${currentPage + 1}`}
+                onLoad={(e) => {
+                  const w = e.currentTarget.clientWidth;
+                  if (w > 0) setRenderedWidth(w);
+                }}
                 className="w-full h-auto block pointer-events-none"
                 draggable={false}
               />
@@ -531,22 +563,22 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
                       </div>
                     )}
 
-                    {/* Live Visual Preview for Replace */}
+                    {/* Live Visual Preview for Replace — Pixel-Exact Scale Sync */}
                     {isReplaced && edit && (
                       <div
-                        className="w-full h-full flex items-center overflow-visible px-0.5 rounded-[1px]"
+                        className="w-full h-full flex items-center overflow-visible rounded-[1px]"
                         style={{
-                          backgroundColor: `${block.bgColor || '#f5f2eb'}E8`,
+                          backgroundColor: `${block.bgColor || '#f5f2eb'}F2`,
                         }}
                       >
                         <span
-                          className="whitespace-nowrap leading-none pointer-events-none"
+                          className="whitespace-nowrap leading-none pointer-events-none origin-left"
                           style={{
                             color: edit.textColor,
                             fontFamily: fontChoiceToCss(edit.fontFamily),
                             fontWeight: edit.isBold ? 700 : 400,
-                            fontSize: `clamp(8px, ${(edit.fontSize / (activeScan.pixelWidth || 1200)) * 100}cqw, 48px)`,
-                            transform: `translate(${edit.offsetX * 0.5}px, ${edit.offsetY * 0.5}px) rotate(${edit.skewAngle}deg)`,
+                            fontSize: `${Math.max(5, Number((edit.fontSize * displayScale).toFixed(2)))}px`,
+                            transform: `translate(${(edit.offsetX * displayScale).toFixed(2)}px, ${(edit.offsetY * displayScale).toFixed(2)}px) rotate(${edit.skewAngle}deg)`,
                           }}
                         >
                           {edit.newText}
@@ -675,18 +707,18 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
                     />
                   </div>
 
-                  {/* Font Family (Serif / Sans / Mono) + Bold */}
+                  {/* Font Family (Serif / Sans / Carlito / Mono) + Bold */}
                   <div className="space-y-1.5">
                     <label className="block font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
-                      {isId ? 'Gaya Font' : 'Font Family'}
+                      {isId ? 'Gaya Font (Auto-Deteksi)' : 'Font Family (Auto-Detected)'}
                     </label>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {(['serif', 'sans', 'mono'] as FontFamilyChoice[]).map((fam) => (
+                    <div className="grid grid-cols-5 gap-1">
+                      {(['serif', 'sans', 'carlito', 'mono'] as FontFamilyChoice[]).map((fam) => (
                         <button
                           key={fam}
                           type="button"
                           onClick={() => updateSelectedEdit({ mode: 'replace', fontFamily: fam })}
-                          className={`py-1.5 px-2 rounded-sm border text-xs font-medium capitalize transition-colors ${
+                          className={`py-1.5 px-1.5 rounded-sm border text-[11px] font-medium capitalize transition-colors ${
                             inspectorFontFamily === fam
                               ? 'border-[var(--color-text)] bg-[var(--color-text)] text-white'
                               : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:border-[var(--color-border-strong)]'
@@ -700,7 +732,7 @@ export const InteractiveDocumentEditor: React.FC<InteractiveDocumentEditorProps>
                         onClick={() =>
                           updateSelectedEdit({ mode: 'replace', isBold: !inspectorIsBold })
                         }
-                        className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-sm border text-xs font-semibold transition-colors ${
+                        className={`flex items-center justify-center py-1.5 px-1.5 rounded-sm border text-xs font-semibold transition-colors ${
                           inspectorIsBold
                             ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
                             : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text)] hover:border-[var(--color-border-strong)]'

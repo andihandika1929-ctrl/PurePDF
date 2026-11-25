@@ -236,6 +236,7 @@ export interface ScanEditorBlock {
   letterSpacing?: number; // letter spacing in px
   fontCategory?: 'formal_serif' | 'modern_sans' | 'condensed' | 'monospace' | 'slab_serif' | 'script' | string;
   fontFamily: string;
+  baselineY?: number;
   skewAngle?: number;
   isUnderline?: boolean; // underline detection from backend / toggled by user
   isModified?: boolean;
@@ -270,9 +271,10 @@ export interface ScanEditItem {
   offsetX?: number; // px fine-tune offset at rendered DPI
   offsetY?: number; // px fine-tune offset at rendered DPI
   fontSize?: number;
-  fontFamily?: 'serif' | 'sans' | 'mono';
+  fontFamily?: 'serif' | 'sans' | 'carlito' | 'mono';
   isBold?: boolean;
   textColor?: string;
+  baselineY?: number;
   skewAngle?: number;
 }
 
