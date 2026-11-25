@@ -1,29 +1,51 @@
 import type { Metadata, Viewport } from 'next';
+import { Space_Grotesk, DM_Sans, IBM_Plex_Mono } from 'next/font/google';
 import '@/styles/globals.css';
+import { MotionProviders } from '@/components/providers/MotionProviders';
 import { AppProvider } from '@/context/AppContext';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { ProPaywallModal } from '@/components/workspace/ProPaywallModal';
 import { AuthModal } from '@/components/auth/AuthModal';
 
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  weight: ['500', '600', '700'],
+  variable: '--font-display',
+  display: 'swap',
+});
+
+const dmSans = DM_Sans({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-sans',
+  display: 'swap',
+});
+
+const ibmPlexMono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-mono',
+  display: 'swap',
+});
+
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#fafafa' },
-    { media: '(prefers-color-scheme: dark)', color: '#09090b' },
+    { media: '(prefers-color-scheme: light)', color: '#F4F4F2' },
+    { media: '(prefers-color-scheme: dark)', color: '#0C0C0B' },
   ],
 };
 
 export const metadata: Metadata = {
-  title: 'PurePDF — Fast, Clean & Private Online PDF Tools (26 Tools)',
+  title: 'PurePDF — Local-First PDF Utility & AI Toolkit',
   description:
-    'Convert, compress, edit, merge, split, and analyze PDF files with zero cloud storage. 21 free client-side tools and 5 advanced PRO AI tools.',
+    'Compress, merge, split, convert, and unlock PDF files directly in browser memory. Zero server retention for standard tools, plus high-accuracy PRO AI processing.',
   keywords: [
     'pdf tools',
     'compress pdf',
     'pdf to word',
     'merge pdf',
-    'ai pdf editor',
-    'free pdf editor',
+    'local pdf editor',
     'zero storage pdf',
   ],
   manifest: '/manifest.json',
@@ -49,17 +71,23 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen bg-[#fafafa] dark:bg-[#09090b] text-[#09090b] dark:text-[#fafafa] transition-colors duration-200 selection:bg-[#ff3700] selection:text-white bg-dot-grid">
-        <AppProvider>
-          <div className="flex flex-col min-h-screen relative overflow-x-hidden">
-            <Navbar />
-            <main className="flex-1">{children}</main>
-            <Footer />
-          </div>
-          <ProPaywallModal />
-          <AuthModal />
-        </AppProvider>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${spaceGrotesk.variable} ${dmSans.variable} ${ibmPlexMono.variable}`}
+    >
+      <body className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)] font-sans transition-colors duration-200 selection:bg-[var(--color-accent)] selection:text-[var(--color-on-accent)] bg-dot-grid">
+        <MotionProviders>
+          <AppProvider>
+            <div className="flex flex-col min-h-screen relative overflow-x-hidden">
+              <Navbar />
+              <main className="flex-1">{children}</main>
+              <Footer />
+            </div>
+            <ProPaywallModal />
+            <AuthModal />
+          </AppProvider>
+        </MotionProviders>
       </body>
     </html>
   );

@@ -4,11 +4,10 @@ import React, { useState } from 'react';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { useApp } from '@/context/AppContext';
-import { getToolBySlug } from '@/config/toolsConfig';
+import { TOOLS, getToolBySlug } from '@/config/toolsConfig';
 import { AdSlot } from '@/components/layout/AdSlot';
 import { SeoContentBlock } from '@/components/layout/SeoContentBlock';
 import { DropzoneUploader } from '@/components/workspace/DropzoneUploader';
-import { Badge } from '@/components/ui/Badge';
 import { ToolIcon } from '@/components/ui/ToolIcon';
 import { ArrowLeft, ShieldCheck } from 'lucide-react';
 import { SecretAdminDashboard } from '@/components/admin/SecretAdminDashboard';
@@ -57,39 +56,43 @@ export default function ToolPage({ params }: ToolPageProps) {
       <div className="flex items-center justify-between">
         <Link
           href="/"
-          className="inline-flex items-center gap-1.5 text-xs font-mono text-neutral-600 dark:text-neutral-400 hover:text-black dark:hover:text-white transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs font-mono text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
-          <span>{language === 'id' ? '← Kembali ke 26 Alat' : '← Back to All 26 Tools'}</span>
+          <span>
+            {language === 'id'
+              ? `Kembali ke ${TOOLS.length} Alat`
+              : `Back to All ${TOOLS.length} Tools`}
+          </span>
         </Link>
 
         <div className="flex items-center gap-2">
           {tool.isPro ? (
-            <Badge variant="pro" size="sm">
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] px-2.5 py-1 rounded-sm bg-[var(--color-accent)] text-[var(--color-on-accent)]">
               PRO AI TOOL
-            </Badge>
+            </span>
           ) : (
-            <Badge variant="default" size="sm">
-              {language === 'id' ? '100% GRATIS DI BROWSER' : '100% CLIENT-SIDE FREE'}
-            </Badge>
+            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.06em] px-2.5 py-1 rounded-sm bg-[var(--color-surface)] text-[var(--color-text-muted)] border border-[var(--color-border)]">
+              {language === 'id' ? 'LOKAL DI BROWSER · GRATIS' : 'LOCAL WASM · FREE'}
+            </span>
           )}
         </div>
       </div>
 
       {/* Tool Header */}
       <div className="text-center space-y-3 max-w-2xl mx-auto">
-        <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-white dark:bg-zinc-800 shadow-[0px_2px_8px_rgba(0,0,0,0.06)] border border-black/5 dark:border-white/5 mb-2">
+        <div className="inline-flex items-center justify-center w-12 h-12 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] shadow-card mb-1">
           <ToolIcon
             name={tool.iconName}
-            className={`w-7 h-7 ${tool.isPro ? 'text-[#ff3700]' : 'text-black dark:text-white'}`}
+            className={`w-6 h-6 ${tool.isPro ? 'text-[var(--color-accent)]' : 'text-[var(--color-text)]'}`}
           />
         </div>
         
-        <h1 className="text-3xl sm:text-5xl font-bold tracking-tight text-black dark:text-white">
+        <h1 className="font-display text-3xl sm:text-5xl font-bold tracking-[-0.03em] text-[var(--color-text)] leading-[1.06]">
           {name}
         </h1>
 
-        <p className="text-sm sm:text-base text-neutral-600 dark:text-neutral-400 font-normal leading-relaxed">
+        <p className="text-sm sm:text-base text-[var(--color-text-secondary)] font-normal leading-relaxed">
           {desc}
         </p>
       </div>

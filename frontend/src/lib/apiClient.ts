@@ -1,6 +1,21 @@
 // frontend/src/lib/apiClient.ts
+import { getSupabase } from './supabaseClient';
+
 export const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const supabase = getSupabase();
+  if (!supabase) return {};
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+  } catch {}
+  return {};
+}
 
 export async function checkBackendHealth(): Promise<{
   online: boolean;
@@ -28,8 +43,10 @@ export async function apiCompressTarget(file: File, targetKb: number): Promise<B
   formData.append('file', file);
   formData.append('target_kb', String(targetKb));
 
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${BACKEND_URL}/api/compress-target`, {
     method: 'POST',
+    headers: authHeaders,
     body: formData,
   });
 
@@ -46,8 +63,10 @@ export async function apiForceUnlock(file: File, password = ''): Promise<Blob> {
   formData.append('file', file);
   formData.append('password', password);
 
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${BACKEND_URL}/api/force-unlock`, {
     method: 'POST',
+    headers: authHeaders,
     body: formData,
   });
 
@@ -63,8 +82,10 @@ export async function apiPdfToWord(file: File): Promise<Blob> {
   const formData = new FormData();
   formData.append('file', file);
 
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${BACKEND_URL}/api/pdf-to-word`, {
     method: 'POST',
+    headers: authHeaders,
     body: formData,
   });
 
@@ -86,8 +107,10 @@ export async function apiAiEditScanned(
   formData.append('boxes', JSON.stringify(boxes));
   if (instruction) formData.append('instruction', instruction);
 
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${BACKEND_URL}/api/ai-edit-scanned`, {
     method: 'POST',
+    headers: authHeaders,
     body: formData,
   });
 
@@ -103,8 +126,10 @@ export async function apiOcrDetect(file: File): Promise<any> {
   const formData = new FormData();
   formData.append('file', file);
 
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${BACKEND_URL}/api/ocr-detect`, {
     method: 'POST',
+    headers: authHeaders,
     body: formData,
   });
 
@@ -121,8 +146,10 @@ export async function apiInpaint(file: File, boxes: any[]): Promise<Blob> {
   formData.append('file', file);
   formData.append('boxes', JSON.stringify(boxes));
 
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${BACKEND_URL}/api/inpaint`, {
     method: 'POST',
+    headers: authHeaders,
     body: formData,
   });
 
@@ -177,8 +204,10 @@ export async function apiScanEditor(
   formData.append('file', file);
   formData.append('page_index', String(pageIndex));
 
+  const authHeaders = await getAuthHeaders();
   const res = await fetch(`${BACKEND_URL}/api/ai/scan-editor`, {
     method: 'POST',
+    headers: authHeaders,
     body: formData,
   });
 

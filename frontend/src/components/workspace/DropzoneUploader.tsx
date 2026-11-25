@@ -2,12 +2,16 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ToolMeta } from '@/config/toolsConfig';
 import { useApp } from '@/context/AppContext';
+import { SPRINGS, EASES } from '@/lib/motion';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { CircularProgressRing, AnimatedCheckmark } from '@/components/ui/MotionStatus';
 import { PageGridBoard } from './PageGridBoard';
 import { CompressOptions, AdvancedCompressSettings } from './CompressOptions';
+import { SignPdfPanel, SignPdfOptions } from './SignPdfPanel';
 import { jobStore } from '@/lib/jobStore';
 import {
   mergePdfs,
@@ -22,12 +26,12 @@ import {
   pdfToImages,
   pdfToText,
   pdfToWordDocx,
+  pdfToPptx,
   pdfToExcel,
   compressPdf,
   compressPdfAdvanced,
   protectPdf,
   unlockPdf,
-  flattenPdf,
   watermarkPdf,
   addPageNumbers,
   cropPdf,
@@ -36,6 +40,11 @@ import {
   repairPdf,
   convertToGrayscalePdf,
   ocrPdf,
+  signPdf,
+  wordToPdf,
+  excelToPdf,
+  pptToPdf,
+  htmlToPdf,
   genericDocumentToPdf,
 } from '@/lib/clientPdfOps';
 import {
@@ -64,6 +73,9 @@ import {
   Zap,
   Sparkles,
   Infinity as InfinityIcon,
+  Download,
+  RotateCcw,
+  ArrowDown,
 } from 'lucide-react';
 import {
   apiCompressTarget,
@@ -110,10 +122,21 @@ export const DropzoneUploader: React.FC<{
   const [secondFile, setSecondFile] = useState<File | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
+  const [isHoveringDropzone, setIsHoveringDropzone] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [completedResult, setCompletedResult] = useState<{
+    jobId: string;
+    blob: Blob;
+    filename: string;
+    mimeType: string;
+    fileSize: number;
+    originalSize: number;
+    isTextDominated?: boolean;
+  } | null>(null);
+  const [hasDownloaded, setHasDownloaded] = useState(false);
 
   // Interactive Document Canvas Editor states (AI Edit Scanned)
   const [scanEditorData, setScanEditorData] = useState<ScanEditorResponse | null>(null);
@@ -190,19 +213,50 @@ export const DropzoneUploader: React.FC<{
     }
   };
 
-  // Helper to hand over completed result to download page
+  // Helper to hand over completed result to inline SVG-checkmark success state (and store in jobStore)
   const handoffDownload = (blob: Blob, filename: string, mimeType: string, isTextDominated?: boolean) => {
     const randomJobId = 'job_' + Math.random().toString(36).substring(2, 9);
+    const originalSize = file?.size || 0;
     jobStore.setJob(randomJobId, {
       blob,
       filename,
       mimeType,
       fileSize: blob.size,
-      originalSize: file?.size || 0,
+      originalSize,
       toolSlug: tool.slug,
       isTextDominated,
     });
-    router.push(`/download/${randomJobId}?tool=${tool.slug}`);
+    setProgress(100);
+    setStatusMessage(t.uploader.readyStatus);
+    setHasDownloaded(false);
+    setCompletedResult({
+      jobId: randomJobId,
+      blob,
+      filename,
+      mimeType,
+      fileSize: blob.size,
+      originalSize,
+      isTextDominated,
+    });
+    setIsProcessing(false);
+  };
+
+  const triggerDirectDownload = () => {
+    if (!completedResult) return;
+    setHasDownloaded(true);
+    const url = URL.createObjectURL(completedResult.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = completedResult.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   };
 
   // Execution dispatcher for standard Tier 1 operations
@@ -235,6 +289,8 @@ export const DropzoneUploader: React.FC<{
     }
 
     setIsProcessing(true);
+    setCompletedResult(null);
+    setHasDownloaded(false);
     setProgress(10);
     setStatusMessage(t.uploader.reading);
     setErrorMessage(null);
@@ -471,6 +527,59 @@ export const DropzoneUploader: React.FC<{
         return;
       }
 
+      if (tool.slug === 'word-to-pdf') {
+        const blob = await wordToPdf(file!, (pct, msg) => {
+          setProgress(pct);
+          setStatusMessage(msg);
+        });
+        handoffDownload(blob, `${baseName}.pdf`, 'application/pdf');
+        return;
+      }
+
+      if (tool.slug === 'excel-to-pdf') {
+        const blob = await excelToPdf(file!, (pct, msg) => {
+          setProgress(pct);
+          setStatusMessage(msg);
+        });
+        handoffDownload(blob, `${baseName}.pdf`, 'application/pdf');
+        return;
+      }
+
+      if (tool.slug === 'ppt-to-pdf') {
+        const blob = await pptToPdf(file!, (pct, msg) => {
+          setProgress(pct);
+          setStatusMessage(msg);
+        });
+        handoffDownload(blob, `${baseName}.pdf`, 'application/pdf');
+        return;
+      }
+
+      if (tool.slug === 'html-to-pdf') {
+        const blob = await htmlToPdf(file!, (pct, msg) => {
+          setProgress(pct);
+          setStatusMessage(msg);
+        });
+        handoffDownload(blob, `${baseName}.pdf`, 'application/pdf');
+        return;
+      }
+
+      if (tool.slug === 'sign-pdf') {
+        const sigOpts = customParams as SignPdfOptions | undefined;
+        if (!sigOpts?.signaturePngDataUrl) {
+          throw new Error(
+            isId
+              ? 'Silakan buat tanda tangan terlebih dahulu sebelum memproses.'
+              : 'Please draw or type your signature before applying.'
+          );
+        }
+        const blob = await signPdf(file!, sigOpts.signaturePngDataUrl, sigOpts, (pct, msg) => {
+          setProgress(pct);
+          setStatusMessage(msg);
+        });
+        handoffDownload(blob, `${baseName}_signed.pdf`, 'application/pdf');
+        return;
+      }
+
       if (tool.slug === 'pdf-to-excel') {
         const blob = await pdfToExcel(file!, (pct, msg) => {
           setProgress(pct);
@@ -480,7 +589,20 @@ export const DropzoneUploader: React.FC<{
         return;
       }
 
-      if (tool.slug === 'pdf-to-ppt' || tool.slug === 'pdf-to-txt') {
+      if (tool.slug === 'pdf-to-ppt') {
+        const blob = await pdfToPptx(file!, (pct, msg) => {
+          setProgress(pct);
+          setStatusMessage(msg);
+        });
+        handoffDownload(
+          blob,
+          `${baseName}.pptx`,
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        );
+        return;
+      }
+
+      if (tool.slug === 'pdf-to-txt') {
         const blob = await pdfToText(file!, (pct, msg) => {
           setProgress(pct);
           setStatusMessage(msg);
@@ -615,7 +737,7 @@ export const DropzoneUploader: React.FC<{
   };
 
   return (
-    <div className="w-full bento-card p-6 sm:p-10 space-y-6 bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10 shadow-[0px_4px_24px_rgba(0,0,0,0.06)]">
+    <div className="w-full rounded-lg p-5 sm:p-8 space-y-6 bg-[var(--color-surface)] border border-[var(--color-border)] shadow-card">
       
       {/* Hidden File Inputs */}
       <input
@@ -625,6 +747,14 @@ export const DropzoneUploader: React.FC<{
         accept={
           isImageToPdf
             ? '.jpg,.jpeg,.png,.webp'
+            : tool.slug === 'word-to-pdf'
+            ? '.docx,.doc,.txt'
+            : tool.slug === 'excel-to-pdf'
+            ? '.xlsx,.xls,.csv'
+            : tool.slug === 'ppt-to-pdf'
+            ? '.pptx,.ppt'
+            : tool.slug === 'html-to-pdf'
+            ? '.html,.htm'
             : '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.html'
         }
         className="hidden"
@@ -670,28 +800,136 @@ export const DropzoneUploader: React.FC<{
           }}
         />
       ) : !file && imageFiles.length === 0 ? (
-        <div
+        <motion.div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          onMouseEnter={() => setIsHoveringDropzone(true)}
+          onMouseLeave={() => setIsHoveringDropzone(false)}
           onClick={() => fileInputRef.current?.click()}
-          className={`flex flex-col items-center justify-center p-8 sm:p-12 rounded-2xl border-2 border-dashed transition-all cursor-pointer ${
+          animate={{
+            scale: isDragging ? 1.02 : 1,
+          }}
+          transition={SPRINGS.tactile}
+          className={`relative overflow-hidden flex flex-col items-center justify-center px-6 py-10 sm:p-12 rounded-md border-2 border-dashed cursor-pointer select-none transition-[border-color,background-color,box-shadow] duration-200 ${
             isDragging
-              ? 'border-[#ff3700] bg-[#ff3700]/5 scale-[1.01]'
-              : 'border-neutral-300 dark:border-zinc-700 hover:border-black dark:hover:border-white bg-neutral-50/50 dark:bg-zinc-950/50'
+              ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/[0.07] shadow-[0_0_0_4px_rgba(255,55,0,0.16),0_16px_36px_-8px_rgba(255,55,0,0.24)]'
+              : 'border-[var(--color-border-strong)] hover:border-[var(--color-accent)]/70 bg-[var(--color-bg)]/70 hover:shadow-[0_8px_24px_-8px_rgba(17,17,16,0.1)]'
           }`}
         >
-          <div className="p-4 rounded-full bg-white dark:bg-zinc-800 shadow-[0px_2px_8px_rgba(0,0,0,0.08)] mb-4">
-            <UploadCloud className="w-8 h-8 text-[#ff3700]" />
+          {/* Swiss Corner Registration Marks */}
+          <span
+            className={`pointer-events-none absolute top-3 left-3 w-3 h-3 border-t-2 border-l-2 transition-colors ${
+              isDragging ? 'border-[var(--color-accent)]' : 'border-[var(--color-border-strong)]'
+            }`}
+          />
+          <span
+            className={`pointer-events-none absolute top-3 right-3 w-3 h-3 border-t-2 border-r-2 transition-colors ${
+              isDragging ? 'border-[var(--color-accent)]' : 'border-[var(--color-border-strong)]'
+            }`}
+          />
+          <span
+            className={`pointer-events-none absolute bottom-3 left-3 w-3 h-3 border-b-2 border-l-2 transition-colors ${
+              isDragging ? 'border-[var(--color-accent)]' : 'border-[var(--color-border-strong)]'
+            }`}
+          />
+          <span
+            className={`pointer-events-none absolute bottom-3 right-3 w-3 h-3 border-b-2 border-r-2 transition-colors ${
+              isDragging ? 'border-[var(--color-accent)]' : 'border-[var(--color-border-strong)]'
+            }`}
+          />
+
+          {/* Tactile Stacked-Paper Spring Visual */}
+          <div className="relative w-24 h-20 flex items-center justify-center mb-5">
+            {/* Back-Left Paper Sheet */}
+            <motion.div
+              animate={
+                isDragging
+                  ? { x: -20, y: -6, rotate: -13, opacity: 1 }
+                  : isHoveringDropzone
+                  ? { x: -11, y: -2, rotate: -7, opacity: 0.9 }
+                  : { x: -5, y: 2, rotate: -3, opacity: 0.7 }
+              }
+              transition={SPRINGS.tactile}
+              className="absolute w-12 h-16 rounded-sm bg-[var(--color-surface)] border border-[var(--color-border-strong)] shadow-card"
+            >
+              <div className="mt-3 mx-2 space-y-1.5">
+                <div className="h-1 w-6 rounded-full bg-[var(--color-border)]" />
+                <div className="h-1 w-4 rounded-full bg-[var(--color-border)]" />
+              </div>
+            </motion.div>
+
+            {/* Back-Right Paper Sheet */}
+            <motion.div
+              animate={
+                isDragging
+                  ? { x: 20, y: -6, rotate: 13, opacity: 1 }
+                  : isHoveringDropzone
+                  ? { x: 11, y: -2, rotate: 7, opacity: 0.9 }
+                  : { x: 5, y: 2, rotate: 3, opacity: 0.7 }
+              }
+              transition={SPRINGS.tactile}
+              className="absolute w-12 h-16 rounded-sm bg-[var(--color-surface)] border border-[var(--color-border-strong)] shadow-card"
+            >
+              <div className="mt-3 mx-2 space-y-1.5">
+                <div className="h-1 w-5 rounded-full bg-[var(--color-border)]" />
+                <div className="h-1 w-7 rounded-full bg-[var(--color-border)]" />
+              </div>
+            </motion.div>
+
+            {/* Front Active Paper Sheet */}
+            <motion.div
+              animate={
+                isDragging
+                  ? { y: -10, scale: 1.08, rotate: 0 }
+                  : isHoveringDropzone
+                  ? { y: -4, scale: 1.03, rotate: 0 }
+                  : { y: 0, scale: 1, rotate: 0 }
+              }
+              transition={SPRINGS.tactile}
+              className={`relative z-10 w-14 h-18 py-3 rounded-sm bg-[var(--color-surface)] border flex flex-col items-center justify-center gap-1.5 shadow-card-elevated transition-colors ${
+                isDragging
+                  ? 'border-[var(--color-accent)]'
+                  : 'border-[var(--color-border-strong)]'
+              }`}
+            >
+              <UploadCloud
+                className={`w-6 h-6 transition-colors ${
+                  isDragging || isHoveringDropzone
+                    ? 'text-[var(--color-accent)]'
+                    : 'text-[var(--color-text)]'
+                }`}
+              />
+              <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
+                {isImageToPdf ? 'IMG' : 'PDF'}
+              </span>
+            </motion.div>
           </div>
-          <h3 className="text-base sm:text-lg font-bold text-black dark:text-white text-center">
-            {t.uploader.dropTitle} <span className="text-[#ff3700] underline">{t.uploader.browse}</span>
+
+          <h3 className="font-display text-lg sm:text-xl font-semibold tracking-[-0.02em] text-[var(--color-text)] text-center">
+            {isDragging ? (
+              <span className="text-[var(--color-accent)]">
+                {isId ? 'Lepas file untuk memuat ke memori' : 'Release to load into memory'}
+              </span>
+            ) : (
+              <>
+                {t.uploader.dropTitle}{' '}
+                <span className="text-[var(--color-accent)] underline underline-offset-4">
+                  {t.uploader.browse}
+                </span>
+              </>
+            )}
           </h3>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1.5 text-center">
+
+          <p className="font-mono text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-muted)] mt-2 text-center">
             {t.uploader.maxSize}
           </p>
 
-          <div className="mt-6">
+          <motion.div
+            whileTap={{ scale: 0.97 }}
+            transition={SPRINGS.tactile}
+            className="mt-6"
+          >
             <Button size="md" variant="primary" type="button">
               {isImageToPdf
                 ? isId
@@ -699,31 +937,38 @@ export const DropzoneUploader: React.FC<{
                   : 'Select Images (JPG, PNG)'
                 : t.uploader.selectFile}
             </Button>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       ) : (
-        /* FILE LOADED & WORKSPACE CONTROLS */
-        <div className="space-y-6">
+        /* FILE LOADED & WORKSPACE CONTROLS (Paper-Drop Spring Entrance) */
+        <motion.div
+          key="workspace-loaded"
+          initial={{ opacity: 0, y: -14, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={SPRINGS.tactile}
+          className="space-y-6"
+        >
           
           {/* File Card Header */}
-          <div className="flex items-center justify-between p-4 rounded-2xl bg-neutral-50 dark:bg-zinc-800/60 border border-black/5 dark:border-white/5">
+          <div className="flex items-center justify-between p-4 rounded-md bg-[var(--color-surface-subtle)]/70 border border-[var(--color-border)]">
             <div className="flex items-center gap-3 truncate">
-              <div className="p-2.5 rounded-xl bg-black text-white dark:bg-white dark:text-black">
+              <div className="w-10 h-10 rounded-md bg-[var(--color-text)] text-[var(--color-surface)] flex items-center justify-center shrink-0">
                 <FileCheck2 className="w-5 h-5" />
               </div>
               <div className="truncate">
-                <p className="text-sm font-bold text-black dark:text-white truncate">
+                <p className="font-display text-sm font-semibold text-[var(--color-text)] truncate">
                   {isImageToPdf && imageFiles.length > 1
                     ? `${imageFiles.length} ${isId ? 'gambar dipilih' : 'images selected'}`
                     : file?.name}
                 </p>
-                <p className="text-xs font-mono text-neutral-500">
-                  {file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : ''} • {t.uploader.ready}
+                <p className="text-xs font-mono text-[var(--color-text-muted)]">
+                  {file ? formatFileSize(file.size) : ''} · {completedResult ? (isId ? 'Selesai diproses' : 'Processed') : t.uploader.ready}
                 </p>
               </div>
             </div>
 
             <button
+              type="button"
               onClick={() => {
                 setFile(null);
                 setImageFiles([]);
@@ -731,41 +976,179 @@ export const DropzoneUploader: React.FC<{
                 setTemplateFile(null);
                 setSecondFile(null);
                 setIsProcessing(false);
+                setCompletedResult(null);
+                setHasDownloaded(false);
                 setErrorMessage(null);
               }}
-              className="text-xs text-neutral-500 hover:text-red-500 font-mono transition-colors p-2"
+              className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-danger)] font-mono transition-colors p-2"
             >
               {t.uploader.remove}
             </button>
           </div>
 
           {/* Error Alert */}
-          {errorMessage && (
-            <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-xs">
-              {errorMessage}
-            </div>
-          )}
+          <AnimatePresence>
+            {errorMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.2, ease: EASES.precision }}
+                className="p-4 rounded-md bg-[var(--color-danger)]/10 border border-[var(--color-danger)]/35 text-[var(--color-danger)] text-sm"
+              >
+                {errorMessage}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {/* Progress Bar during execution */}
-          {isProcessing && (
-            <div className="space-y-3 p-5 rounded-2xl bg-[#ff3700]/5 border border-[#ff3700]/20 animate-in fade-in">
-              <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-[#ff3700] font-bold flex items-center gap-1.5">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> {statusMessage || 'Processing...'}
-                </span>
-                <span className="font-bold">{progress}%</span>
-              </div>
-              <div className="w-full h-2.5 rounded-full bg-neutral-200 dark:bg-zinc-800 overflow-hidden">
-                <div
-                  className="h-full bg-[#ff3700] transition-all duration-300 ease-out rounded-full"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            </div>
-          )}
+          {/* Processing Panel: Circular Progress Ring + Horizontal Bar + Spinner Button */}
+          <AnimatePresence mode="wait">
+            {isProcessing && (
+              <motion.div
+                key="processing-panel"
+                initial={{ opacity: 0, y: 8, scale: 0.99 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.99 }}
+                transition={SPRINGS.panel}
+                className="p-6 sm:p-8 rounded-md bg-[var(--color-bg)] border border-[var(--color-accent)]/35 space-y-6"
+              >
+                <div className="flex flex-col sm:flex-row items-center gap-5">
+                  <CircularProgressRing progress={progress} size={82} strokeWidth={4.5} />
+
+                  <div className="flex-1 w-full space-y-2.5 text-center sm:text-left">
+                    <div className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.06em] text-[var(--color-accent)] font-semibold">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>{isId ? 'MEMPROSES DI MEMORI' : 'PROCESSING IN MEMORY'}</span>
+                    </div>
+                    <p className="font-display text-base font-semibold text-[var(--color-text)]">
+                      {statusMessage || (isId ? 'Sedang memproses dokumen...' : 'Processing document...')}
+                    </p>
+                    <div className="w-full h-2 rounded-full bg-[var(--color-surface-subtle)] overflow-hidden border border-[var(--color-border)]">
+                      <motion.div
+                        className="h-full w-full bg-[var(--color-accent)] origin-left rounded-full"
+                        initial={{ scaleX: 0.04 }}
+                        animate={{ scaleX: Math.max(0.04, Math.min(1, progress / 100)) }}
+                        transition={SPRINGS.mechanical}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-center sm:justify-end pt-2 border-t border-[var(--color-border)]">
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center justify-center gap-2 h-11 px-6 rounded-full bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)] border border-[var(--color-border)] font-mono text-xs font-semibold cursor-wait select-none"
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin text-[var(--color-accent)]" />
+                    <span>{isId ? 'Memproses...' : 'Processing...'}</span>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Inline Success State: SVG-Draw Checkmark + Green Download Button */}
+            {!isProcessing && completedResult && (
+              <motion.div
+                key="success-panel"
+                initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={SPRINGS.panel}
+                className="p-6 sm:p-8 rounded-md bg-[var(--color-bg)] border border-[var(--color-success)]/40 text-center space-y-6"
+              >
+                <div className="flex flex-col items-center space-y-3">
+                  <AnimatedCheckmark size={72} />
+                  <div className="space-y-1">
+                    <span className="font-mono text-[11px] uppercase tracking-[0.06em] text-[var(--color-success)] font-semibold">
+                      {isId ? 'PROSES SELESAI · 0 RETENTION' : 'COMPLETE · ZERO RETENTION'}
+                    </span>
+                    <h3 className="font-display text-2xl font-bold tracking-[-0.025em] text-[var(--color-text)]">
+                      {isId ? 'Dokumen Siap Diunduh' : 'Document Ready to Download'}
+                    </h3>
+                  </div>
+                </div>
+
+                {/* Output Telemetry Box */}
+                <div className="max-w-md mx-auto p-4 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-between gap-3 text-left">
+                  <div className="truncate">
+                    <p className="font-display text-sm font-semibold text-[var(--color-text)] truncate">
+                      {completedResult.filename}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-[var(--color-text-muted)] mt-0.5">
+                      <span>{formatFileSize(completedResult.fileSize)}</span>
+                      {completedResult.originalSize > completedResult.fileSize && (
+                        <span className="inline-flex items-center gap-0.5 text-[var(--color-success)] font-semibold">
+                          <ArrowDown className="w-3 h-3" />
+                          {Math.round((1 - completedResult.fileSize / completedResult.originalSize) * 100)}%{' '}
+                          {isId ? 'lebih hemat' : 'smaller'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.06em] px-2 py-1 rounded-sm bg-[var(--color-surface-subtle)] border border-[var(--color-border)] text-[var(--color-text-muted)] shrink-0">
+                    {completedResult.mimeType.split('/')[1] || 'PDF'}
+                  </span>
+                </div>
+
+                {/* Primary Green Download Button + Secondary Reset */}
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
+                  <motion.button
+                    type="button"
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.97 }}
+                    transition={SPRINGS.tactile}
+                    onClick={triggerDirectDownload}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 h-12 px-8 rounded-full bg-[var(--color-success)] hover:brightness-110 text-white font-display font-semibold text-sm shadow-card-elevated transition-[filter]"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      {hasDownloaded
+                        ? isId
+                          ? 'Unduh Lagi'
+                          : 'Download Again'
+                        : isId
+                        ? 'Download File Sekarang'
+                        : 'Download Processed File'}
+                    </span>
+                  </motion.button>
+
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.97 }}
+                    transition={SPRINGS.tactile}
+                    onClick={() => {
+                      setFile(null);
+                      setImageFiles([]);
+                      setAdditionalFiles([]);
+                      setTemplateFile(null);
+                      setSecondFile(null);
+                      setCompletedResult(null);
+                      setHasDownloaded(false);
+                      setErrorMessage(null);
+                    }}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 h-12 px-5 rounded-full bg-[var(--color-surface)] hover:bg-[var(--color-surface-subtle)] text-[var(--color-text)] border border-[var(--color-border)] font-medium text-xs transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>{isId ? 'Proses File Lain' : 'Process Another File'}</span>
+                  </motion.button>
+                </div>
+
+                {hasDownloaded && (
+                  <motion.p
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="font-mono text-xs text-[var(--color-success)]"
+                  >
+                    ✓ {t.download.downloadStarted}
+                  </motion.p>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* SPECIALIZED WORKSPACE PANELS */}
-          {!isProcessing && (
+          {!isProcessing && !completedResult && (
             <>
               {/* 1. PageGridBoard for Organize Tools */}
               {isOrganizeTool && file && (
@@ -788,6 +1171,15 @@ export const DropzoneUploader: React.FC<{
                 <CompressOptions
                   file={file}
                   onCompress={(settings: AdvancedCompressSettings) => executeOperation(settings)}
+                  isProcessing={isProcessing}
+                  language={language}
+                />
+              )}
+
+              {/* 2b. Sign PDF Interactive Signature Pad */}
+              {tool.slug === 'sign-pdf' && file && (
+                <SignPdfPanel
+                  onApply={(sigOptions) => executeOperation(sigOptions)}
                   isProcessing={isProcessing}
                   language={language}
                 />
@@ -1168,6 +1560,7 @@ export const DropzoneUploader: React.FC<{
               {/* 14. Default Action Bar for remaining tools (Convert, PRO AI, etc.) */}
               {!isOrganizeTool &&
                 tool.slug !== 'compress-pdf' &&
+                tool.slug !== 'sign-pdf' &&
                 tool.slug !== 'protect-pdf' &&
                 tool.slug !== 'watermark-pdf' &&
                 tool.slug !== 'page-numbers' &&
@@ -1296,7 +1689,7 @@ export const DropzoneUploader: React.FC<{
             </>
           )}
 
-        </div>
+        </motion.div>
       )}
 
     </div>

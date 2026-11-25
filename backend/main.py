@@ -1,12 +1,13 @@
 # backend/main.py
 import json
 import os
-from typing import Optional
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from typing import Optional, Dict, Any
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from dotenv import load_dotenv
 
+from services.auth_service import verify_supabase_jwt, consume_ai_quota_server
 from services.compress_service import (
     compress_pdf_to_target,
     get_ghostscript_binary,
@@ -30,13 +31,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS configuration for cloud deployment (allows Vercel, localhost, and custom domains)
+# Strict CORS whitelist from CORS_ORIGINS env (never wildcard '*' with credentials)
+raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+allowed_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip() and origin.strip() != "*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 @app.get("/api/health")
@@ -52,6 +56,7 @@ async def health_check():
 async def api_compress_target(
     file: UploadFile = File(...),
     target_kb: int = Form(100),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
     Compress PDF to strictly under target_kb (100KB or 200KB) using Ghostscript
@@ -90,10 +95,12 @@ async def api_compress_target(
 async def api_force_unlock(
     file: UploadFile = File(...),
     password: Optional[str] = Form(""),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
     Remove owner security permissions, printing locks, and copy restrictions.
     """
+    await consume_ai_quota_server(current_user["id"], cost=2)
     try:
         content = await file.read()
         unlocked_bytes = force_unlock_pdf(content, password=password)
@@ -112,10 +119,12 @@ async def api_force_unlock(
 @app.post("/api/pdf-to-word")
 async def api_pdf_to_word(
     file: UploadFile = File(...),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
     High-accuracy DOCX conversion reconstructing tables and complex paragraph layouts.
     """
+    await consume_ai_quota_server(current_user["id"], cost=2)
     try:
         content = await file.read()
         docx_bytes = convert_pdf_to_word_docx(content)
@@ -134,6 +143,7 @@ async def api_pdf_to_word(
 @app.post("/api/ocr-detect")
 async def api_ocr_detect(
     file: UploadFile = File(...),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
     Detect text bounding boxes and line coordinates in scanned documents.
@@ -149,6 +159,7 @@ async def api_ocr_detect(
 async def api_inpaint(
     file: UploadFile = File(...),
     boxes: str = Form("[]"),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
     Erase text inside image/scanned PDF using OpenCV Telea Inpainting algorithm.
@@ -169,6 +180,7 @@ async def api_inpaint(
 async def api_font_match(
     file: UploadFile = File(...),
     text: str = Form("Sample"),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
     Match font family, size, and background color using Google Gemini Vision API.
@@ -185,11 +197,13 @@ async def api_ai_edit_scanned(
     file: UploadFile = File(...),
     boxes: Optional[str] = Form("[]"),
     instruction: Optional[str] = Form(""),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
     AI Edit Scanned & Screenshot PDF using Google Gemini 2.5 Flash and OpenCV Inpainting.
     Erases designated or auto-detected scan text, in-paints clean background texture, and exports clean PDF.
     """
+    await consume_ai_quota_server(current_user["id"], cost=2)
     try:
         content = await file.read()
         box_list = []
@@ -220,6 +234,7 @@ async def api_ai_edit_scanned(
 async def api_scan_editor(
     file: UploadFile = File(...),
     page_index: int = Form(0),
+    current_user: Dict[str, Any] = Depends(verify_supabase_jwt),
 ):
     """
     Scan document page for Interactive Canvas Editor.

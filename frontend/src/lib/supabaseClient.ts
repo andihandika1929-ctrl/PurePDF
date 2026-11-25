@@ -470,6 +470,29 @@ export async function consumeAiQuota(
   const supabase = getSupabase();
   const today = new Date().toISOString().split('T')[0];
 
+  // Prefer atomic PostgreSQL RPC `consume_ai_quota_atomic` (row-locked FOR UPDATE)
+  if (supabase) {
+    try {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('consume_ai_quota_atomic', {
+        p_user_id: user.id,
+        p_cost: cost,
+      });
+
+      if (!rpcError && rpcData && typeof rpcData === 'object') {
+        return {
+          allowed: Boolean(rpcData.allowed),
+          quotaType: rpcData.quota_type,
+          dailyUsed: typeof rpcData.daily_used === 'number' ? rpcData.daily_used : user.daily_ai_used || 0,
+          creditsRemaining:
+            typeof rpcData.credits_remaining === 'number' ? rpcData.credits_remaining : user.credits,
+          errorReason: rpcData.error_reason,
+        };
+      }
+    } catch {
+      // Fallback below only for offline/local-dev without RPC applied yet
+    }
+  }
+
   // 1. Unlimited access
   if (user.is_unlimited || user.role === 'admin' || user.is_admin) {
     return {
@@ -559,11 +582,13 @@ export async function consumeAiQuota(
   };
 }
 
+let usageLogsRemoteDisabled = false;
+
 /**
- * Log tool usage to `usage_logs` without storing user files
+ * Log tool usage to local analytics (and optionally Supabase `usage_logs` for authenticated sessions)
+ * without storing user files or spamming HTTP 400 when schema/RLS differs.
  */
 export async function recordToolUsage(toolSlug: string, isPro: boolean, creditsSpent = 0) {
-  const supabase = getSupabase();
   const logEntry: UsageLog = {
     tool_slug: toolSlug,
     is_pro: isPro,
@@ -571,21 +596,32 @@ export async function recordToolUsage(toolSlug: string, isPro: boolean, creditsS
     created_at: new Date().toISOString(),
   };
 
-  if (supabase) {
-    try {
-      await supabase.from('usage_logs').insert([logEntry]);
-    } catch (e) {
-      console.warn('Could not record usage to Supabase', e);
-    }
-  }
-
-  // Also maintain local memory count for instant analytics
+  // Persist to local analytics immediately (zero latency, works 100% offline)
   if (typeof window !== 'undefined') {
     try {
       const history: UsageLog[] = JSON.parse(localStorage.getItem('purepdf_usage_history') || '[]');
       history.unshift(logEntry);
       localStorage.setItem('purepdf_usage_history', JSON.stringify(history.slice(0, 100)));
     } catch {}
+  }
+
+  const supabase = getSupabase();
+  if (!supabase || usageLogsRemoteDisabled) return;
+
+  try {
+    // Only attempt remote logging when user has an active authenticated session
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session) return;
+
+    const { error } = await supabase.from('usage_logs').insert([logEntry]);
+    if (error) {
+      // Disable remote insert for this session if schema column or RLS rejects payload
+      if (error.code === 'PGRST204' || error.code === '42501' || error.code === '42703') {
+        usageLogsRemoteDisabled = true;
+      }
+    }
+  } catch {
+    usageLogsRemoteDisabled = true;
   }
 }
 

@@ -4,12 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { notFound, useRouter } from 'next/navigation';
 import { useApp } from '@/context/AppContext';
-import {
-  UserProfile,
-  getAdminStats,
-  getAdminUsersList,
-  adminUpdateUserProfile,
-} from '@/lib/supabaseClient';
+import { UserProfile } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import {
@@ -73,7 +68,7 @@ export const SecretAdminDashboard: React.FC<{ secretParam?: string }> = ({
             Autentikasi Admin Diperlukan
           </h2>
           <p className="text-xs text-neutral-500">
-            Halaman ini khusus untuk administrator terdaftar (<strong>{expectedAdminEmail}</strong>). Silakan masuk ke akun Anda.
+            Halaman ini khusus untuk administrator terdaftar. Silakan masuk ke akun administrator Anda.
           </p>
         </div>
         <Button
@@ -119,12 +114,21 @@ export const SecretAdminDashboard: React.FC<{ secretParam?: string }> = ({
   const loadData = async () => {
     setLoading(true);
     try {
-      const [statsData, userList] = await Promise.all([
-        getAdminStats(),
-        getAdminUsersList(searchQuery, statusFilter),
-      ]);
-      setStats(statsData);
-      setUsers(userList);
+      const params = new URLSearchParams();
+      if (searchQuery.trim()) params.set('q', searchQuery.trim());
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+
+      const res = await fetch(`/api/admin/users?${params.toString()}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Admin API returned HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setStats(data.stats);
+      setUsers(data.users || []);
     } catch (e) {
       console.error('Failed loading admin data:', e);
     } finally {
@@ -180,13 +184,23 @@ export const SecretAdminDashboard: React.FC<{ secretParam?: string }> = ({
           ? 'user'
           : selectedUser.role || 'user';
 
-      await adminUpdateUserProfile(selectedUser.id, {
-        credits: Number(drawerCredits),
-        is_unlimited: drawerIsUnlimited,
-        is_vvip: drawerIsVvip,
-        vvip_expires_at: drawerVvipExpiresAt,
-        role: targetRole,
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          userId: selectedUser.id,
+          credits: Number(drawerCredits),
+          is_unlimited: drawerIsUnlimited,
+          is_vvip: drawerIsVvip,
+          vvip_expires_at: drawerVvipExpiresAt,
+          role: targetRole,
+        }),
       });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Update failed (HTTP ${res.status})`);
+      }
 
       // Optimistically update table user in local state immediately
       setUsers((prev) =>

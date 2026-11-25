@@ -18,10 +18,10 @@ let pdfjsLibInstance: any = null;
 export async function getPdfJs() {
   if (typeof window === 'undefined') return null;
   if (!pdfjsLibInstance) {
-    // Load PDF.js legacy build for maximum browser compatibility
+    // Load PDF.js legacy build for maximum browser compatibility (local offline worker)
     pdfjsLibInstance = await import('pdfjs-dist/legacy/build/pdf.js');
     if (pdfjsLibInstance.GlobalWorkerOptions) {
-      pdfjsLibInstance.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+      pdfjsLibInstance.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
     }
   }
   return pdfjsLibInstance;
@@ -487,7 +487,20 @@ export async function pdfToText(
 }
 
 /**
- * 10. PDF to Word (DOCX formatted)
+ * Helper: Escape XML special characters for OOXML (.docx)
+ */
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+}
+
+/**
+ * 10. PDF to Word (Genuine OOXML .docx ZIP Package)
  */
 export async function pdfToWordDocx(
   file: File,
@@ -500,24 +513,18 @@ export async function pdfToWordDocx(
   const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
   const numPages = pdf.numPages;
 
-  let htmlDoc = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-<head><meta charset='utf-8'><title>${file.name}</title>
-<style>
-  body { font-family: 'Calibri', 'Arial', sans-serif; font-size: 11pt; line-height: 1.5; margin: 1in; }
-  h1 { font-size: 18pt; color: #111; margin-bottom: 8px; }
-  .page-break { page-break-before: always; margin-top: 24px; border-top: 1px dashed #ccc; padding-top: 16px; }
-  p { margin: 6px 0; }
-</style>
-</head>
-<body>
-<h1>${file.name.replace(/\.[^/.]+$/, '')}</h1>
-<p style="color: #666; font-size: 9pt;">Converted with PurePDF Client Engine</p>
-<hr/>`;
+  const docTitle = file.name.replace(/\.[^/.]+$/, '');
+  const paragraphsXml: string[] = [];
+
+  // Title paragraph
+  paragraphsXml.push(
+    `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${escapeXml(docTitle)}</w:t></w:r></w:p>`
+  );
 
   for (let i = 1; i <= numPages; i++) {
     onProgress?.(
-      Math.round((i / numPages) * 90),
-      `Converting page ${i} of ${numPages} to Word document...`
+      Math.round((i / numPages) * 85),
+      `Converting page ${i} of ${numPages} into OOXML Word structure...`
     );
 
     const page = await pdf.getPage(i);
@@ -539,19 +546,190 @@ export async function pdfToWordDocx(
     });
     if (currentLine.trim()) pageLines.push(currentLine.trim());
 
-    if (i > 1) htmlDoc += `<div class="page-break"></div>`;
-    htmlDoc += `<h3>Page ${i}</h3>`;
+    if (i > 1) {
+      paragraphsXml.push(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`);
+    }
+
+    if (numPages > 1) {
+      paragraphsXml.push(
+        `<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Page ${i}</w:t></w:r></w:p>`
+      );
+    }
+
     pageLines.forEach((line) => {
-      htmlDoc += `<p>${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`;
+      paragraphsXml.push(
+        `<w:p><w:r><w:t xml:space="preserve">${escapeXml(line)}</w:t></w:r></w:p>`
+      );
     });
   }
 
-  htmlDoc += `</body></html>`;
-  onProgress?.(100, 'Word conversion complete!');
+  onProgress?.(92, 'Packaging genuine OOXML .docx archive...');
 
-  return new Blob([htmlDoc], {
-    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  const zip = new JSZip();
+
+  zip.file(
+    '[Content_Types].xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`
+  );
+
+  zip.file(
+    '_rels/.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`
+  );
+
+  zip.file(
+    'word/_rels/document.xml.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`
+  );
+
+  zip.file(
+    'word/styles.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="22"/></w:rPr>
+    <w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto"/></w:pPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:basedOn w:val="Normal"/>
+    <w:rPr><w:b/><w:sz w:val="36"/><w:color w:val="111110"/></w:rPr>
+    <w:pPr><w:spacing w:before="120" w:after="200"/></w:pPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2">
+    <w:name w:val="heading 2"/>
+    <w:basedOn w:val="Normal"/>
+    <w:rPr><w:b/><w:sz w:val="26"/><w:color w:val="3A3A36"/></w:rPr>
+    <w:pPr><w:spacing w:before="200" w:after="100"/></w:pPr>
+  </w:style>
+</w:styles>`
+  );
+
+  zip.file(
+    'word/document.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    ${paragraphsXml.join('\n    ')}
+    <w:sectPr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+    </w:sectPr>
+  </w:body>
+</w:document>`
+  );
+
+  const docxBytes = await zip.generateAsync({
+    type: 'uint8array',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   });
+  onProgress?.(100, 'Genuine .docx conversion complete!');
+
+  return bytesToBlob(
+    docxBytes,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  );
+}
+
+/**
+ * 10b. PDF to PowerPoint (Genuine .pptx via pptxgenjs)
+ * Renders each PDF page into a crisp widescreen slide + attaches extracted text as speaker notes.
+ */
+export async function pdfToPptx(
+  file: File,
+  onProgress?: (percent: number, msg: string) => void
+): Promise<Blob> {
+  const pdfjs = await getPdfJs();
+  if (!pdfjs) throw new Error('PDF.js engine is not ready');
+
+  onProgress?.(10, 'Loading PDF pages for PowerPoint conversion...');
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  const numPages = pdf.numPages;
+
+  const pptxModule = await import('pptxgenjs');
+  const PptxGenJS = (pptxModule as any).default || pptxModule;
+  const pres = new PptxGenJS();
+  pres.layout = 'LAYOUT_16x9';
+  pres.title = file.name.replace(/\.[^/.]+$/, '');
+  pres.author = 'PurePDF Client Engine';
+
+  // LAYOUT_16x9 dimensions in inches: 10 x 5.625
+  const SLIDE_W = 10;
+  const SLIDE_H = 5.625;
+
+  for (let i = 1; i <= numPages; i++) {
+    onProgress?.(
+      15 + Math.round((i / numPages) * 72),
+      `Rendering slide ${i} of ${numPages}...`
+    );
+
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d');
+
+    const slide = pres.addSlide();
+    slide.background = { color: 'F4F4F2' };
+
+    if (ctx) {
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const imgDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+      // Fit page proportionally inside 16:9 slide with clean margins
+      const maxW = SLIDE_W - 0.5;
+      const maxH = SLIDE_H - 0.4;
+      const imgAspect = canvas.width / canvas.height;
+      let drawW = maxW;
+      let drawH = drawW / imgAspect;
+      if (drawH > maxH) {
+        drawH = maxH;
+        drawW = drawH * imgAspect;
+      }
+
+      slide.addImage({
+        data: imgDataUrl,
+        x: (SLIDE_W - drawW) / 2,
+        y: (SLIDE_H - drawH) / 2,
+        w: drawW,
+        h: drawH,
+      });
+    }
+
+    // Attach extracted page text into speaker notes for searchability/editing
+    try {
+      const textContent = await page.getTextContent();
+      const notes = textContent.items
+        .map((it: any) => ('str' in it ? it.str : ''))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (notes) {
+        slide.addNotes(notes);
+      }
+    } catch {}
+  }
+
+  onProgress?.(92, 'Packaging genuine .pptx presentation...');
+  const output = await pres.write({ outputType: 'blob' });
+  onProgress?.(100, 'PowerPoint (.pptx) conversion complete!');
+
+  return output as Blob;
 }
 
 /**
@@ -640,7 +818,8 @@ export async function compressPdf(
 }
 
 /**
- * 13. Protect PDF (Password Encryption)
+ * 13. Protect PDF (Genuine RC4-128 Password Encryption via @pdfsmaller/pdf-encrypt-lite)
+ * Writes a real /Encrypt dictionary and encrypts all PDF streams/strings in browser memory.
  */
 export async function protectPdf(
   file: File,
@@ -651,22 +830,26 @@ export async function protectPdf(
     throw new Error('Please enter a password with at least 3 characters.');
   }
 
-  onProgress?.(20, 'Loading document for encryption...');
+  onProgress?.(20, 'Loading PDF structure in browser memory...');
   const buffer = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
 
-  onProgress?.(60, 'Applying AES-256 password protection in browser memory...');
-  // Note: pdf-lib uses standard document metadata & permissions dictionary for client protection
-  pdfDoc.setTitle(`[PROTECTED] ${file.name}`);
-  pdfDoc.setSubject(`Protected with PurePDF Client AES Security`);
-  pdfDoc.setProducer(`PurePDF Secure Engine`);
-  pdfDoc.setCreator(`PurePDF Client Encryption`);
+  onProgress?.(45, 'Preparing PDF cross-reference table for encryption...');
+  // Standard XRef table (useObjectStreams: false) ensures 100% compatibility with RC4-128 /Encrypt
+  const cleanBytes = await pdfDoc.save({ useObjectStreams: false });
 
-  onProgress?.(85, 'Securing file...');
-  const bytes = await pdfDoc.save();
-  onProgress?.(100, 'Document protected!');
+  onProgress?.(70, 'Encrypting PDF streams with 128-bit password security...');
+  const { encryptPDF } = await import('@pdfsmaller/pdf-encrypt-lite');
+  const encryptedBytes = await encryptPDF(cleanBytes, userPassword, {
+    ownerPassword: userPassword,
+    allowPrinting: true,
+    allowModifying: false,
+    allowCopying: false,
+    allowAnnotating: false,
+  });
 
-  return bytesToBlob(bytes);
+  onProgress?.(100, 'Document encrypted with password!');
+  return bytesToBlob(encryptedBytes);
 }
 
 /**
@@ -1101,7 +1284,10 @@ export async function splitPdfEveryNPages(
 }
 
 /**
- * 23. Redact / Blackout PDF (Censor sensitive text / regions)
+ * 23. Redact / Blackout PDF (Real keyword coordinate search + rasterized stream destruction)
+ * Locates exact bounding boxes of matched keywords via PDF.js getTextContent(),
+ * paints solid #000000 redaction blocks over those regions on high-DPI canvas,
+ * and rebuilds pages as rasterized images so redacted text is 100% destroyed from the PDF stream.
  */
 export async function redactPdf(
   file: File,
@@ -1109,56 +1295,116 @@ export async function redactPdf(
   censorBoxes: { page: number; x: number; y: number; w: number; h: number }[] = [],
   onProgress?: (percent: number, msg: string) => void
 ): Promise<Blob> {
-  const buffer = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
-  const pages = pdfDoc.getPages();
+  const pdfjs = await getPdfJs();
+  if (!pdfjs) throw new Error('PDF.js engine is not ready');
 
-  onProgress?.(40, 'Applying permanent blackout redaction layers...');
+  const cleanedKeywords = keywords
+    .map((k) => k.trim().toLowerCase())
+    .filter(Boolean);
 
-  // Draw solid black boxes on designated pages/areas
-  pages.forEach((page, pageIdx) => {
-    const { width, height } = page.getSize();
+  onProgress?.(12, 'Scanning PDF text streams for sensitive keywords...');
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  const numPages = pdf.numPages;
 
-    // Default sample censor bar in the middle if no coordinates provided
-    if (censorBoxes.length === 0) {
-      page.drawRectangle({
-        x: 50,
-        y: height - 180,
-        width: width - 100,
-        height: 28,
-        color: rgb(0, 0, 0),
-      });
+  const outDoc = await PDFDocument.create();
+  const RENDER_SCALE = 2.0;
+  let totalMatches = 0;
 
-      page.drawRectangle({
-        x: 50,
-        y: height - 240,
-        width: width / 2,
-        height: 22,
-        color: rgb(0, 0, 0),
-      });
-    } else {
-      censorBoxes
-        .filter((b) => b.page === pageIdx)
-        .forEach((box) => {
-          page.drawRectangle({
-            x: box.x,
-            y: box.y,
-            width: box.w,
-            height: box.h,
-            color: rgb(0, 0, 0),
-          });
-        });
+  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    onProgress?.(
+      15 + Math.round((pageNum / numPages) * 70),
+      `Redacting page ${pageNum} of ${numPages}...`
+    );
+
+    const page = await pdf.getPage(pageNum);
+    const origViewport = page.getViewport({ scale: 1.0 });
+    const renderViewport = page.getViewport({ scale: RENDER_SCALE });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(renderViewport.width);
+    canvas.height = Math.round(renderViewport.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not create canvas context for redaction');
+
+    await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+
+    // 1. Locate exact keyword bounding boxes from PDF text items
+    const textContent = await page.getTextContent();
+    ctx.fillStyle = '#000000';
+
+    for (const rawItem of textContent.items as any[]) {
+      if (!('str' in rawItem) || !rawItem.str) continue;
+      const itemText = String(rawItem.str);
+      const lowerText = itemText.toLowerCase();
+
+      const matched = cleanedKeywords.some((kw) => lowerText.includes(kw));
+      if (!matched) continue;
+
+      totalMatches++;
+      // Transform PDF coordinates [scaleX, skewY, skewX, scaleY, tx, ty] into viewport pixel coords
+      const tx = pdfjs.Util
+        ? pdfjs.Util.transform(renderViewport.transform, rawItem.transform)
+        : [
+            rawItem.transform[0] * RENDER_SCALE,
+            rawItem.transform[1] * RENDER_SCALE,
+            rawItem.transform[2] * RENDER_SCALE,
+            rawItem.transform[3] * RENDER_SCALE,
+            rawItem.transform[4] * RENDER_SCALE,
+            renderViewport.height - rawItem.transform[5] * RENDER_SCALE,
+          ];
+
+      const fontHeight = Math.max(
+        10 * RENDER_SCALE,
+        Math.hypot(tx[2], tx[3]) || Math.abs(rawItem.height * RENDER_SCALE) || 12 * RENDER_SCALE
+      );
+      const boxWidth = Math.max(
+        24 * RENDER_SCALE,
+        (rawItem.width || itemText.length * 6) * RENDER_SCALE
+      );
+      const boxX = tx[4] - 2;
+      const boxY = tx[5] - fontHeight * 0.88;
+
+      ctx.fillRect(boxX, boxY, boxWidth + 4, fontHeight * 1.15);
     }
-  });
 
-  onProgress?.(80, 'Sanitizing underlying streams...');
-  try {
-    const form = pdfDoc.getForm();
-    form.flatten();
-  } catch {}
+    // 2. Apply any explicit manual censor boxes
+    censorBoxes
+      .filter((b) => b.page === pageNum - 1)
+      .forEach((box) => {
+        ctx.fillRect(
+          box.x * RENDER_SCALE,
+          renderViewport.height - (box.y + box.h) * RENDER_SCALE,
+          box.w * RENDER_SCALE,
+          box.h * RENDER_SCALE
+        );
+      });
 
-  const sanitizedBytes = await pdfDoc.save();
-  onProgress?.(100, 'Redaction completed! Confidential data is destroyed.');
+    // 3. Embed rasterized redacted page (permanently destroys underlying text stream)
+    const jpegUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const base64 = jpegUrl.split(',')[1];
+    const imgBytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const embeddedImg = await outDoc.embedJpg(imgBytes);
+    const newPage = outDoc.addPage([origViewport.width, origViewport.height]);
+    newPage.drawImage(embeddedImg, {
+      x: 0,
+      y: 0,
+      width: origViewport.width,
+      height: origViewport.height,
+    });
+  }
+
+  outDoc.setTitle(`${file.name.replace(/\.[^/.]+$/, '')} [Redacted]`);
+  outDoc.setProducer('PurePDF Stream-Destructive Redaction Engine');
+
+  onProgress?.(94, `Finalizing sanitized PDF (${totalMatches} keyword match(es) destroyed)...`);
+  const sanitizedBytes = await outDoc.save({ useObjectStreams: true });
+  onProgress?.(
+    100,
+    totalMatches > 0
+      ? `Redaction complete! ${totalMatches} sensitive match(es) permanently destroyed.`
+      : 'Redaction complete! Pages flattened and sanitized.'
+  );
 
   return bytesToBlob(sanitizedBytes);
 }
@@ -1362,5 +1608,825 @@ export async function ocrPdf(
   const bytes = await pdfDoc.save();
   onProgress?.(100, 'Searchable OCR PDF ready!');
 
+  return bytesToBlob(bytes);
+}
+
+/**
+ * Helper: Sanitize text to WinAnsi-safe ASCII/Latin-1 for pdf-lib StandardFonts
+ */
+function sanitizeWinAnsi(input: string): string {
+  return input
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\u2022/g, '-')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, ' ');
+}
+
+/**
+ * Helper: Word-wrap a single paragraph string to fit within maxWidth
+ */
+function wrapTextLines(
+  text: string,
+  font: { widthOfTextAtSize: (t: string, size: number) => number },
+  fontSize: number,
+  maxWidth: number
+): string[] {
+  const cleaned = sanitizeWinAnsi(text).replace(/\s+/g, ' ').trim();
+  if (!cleaned) return [];
+
+  const words = cleaned.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
+      current = candidate;
+    } else {
+      if (current) lines.push(current);
+      // Break ultra-long unbroken tokens safely
+      if (font.widthOfTextAtSize(word, fontSize) > maxWidth) {
+        let chunk = '';
+        for (const ch of word) {
+          if (font.widthOfTextAtSize(chunk + ch, fontSize) <= maxWidth) {
+            chunk += ch;
+          } else {
+            if (chunk) lines.push(chunk);
+            chunk = ch;
+          }
+        }
+        current = chunk;
+      } else {
+        current = word;
+      }
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/**
+ * 28. Sign PDF (Embed transparent PNG signature + optional signer/date stamp)
+ */
+export async function signPdf(
+  file: File,
+  signaturePngDataUrl: string,
+  options: {
+    position: 'bottom-right' | 'bottom-left' | 'bottom-center' | 'top-right';
+    targetPages: 'last' | 'first' | 'all';
+    signerName?: string;
+    includeDate?: boolean;
+  },
+  onProgress?: (percent: number, msg: string) => void
+): Promise<Blob> {
+  if (!signaturePngDataUrl || !signaturePngDataUrl.includes('base64,')) {
+    throw new Error('Invalid signature image data. Please draw or type your signature.');
+  }
+
+  onProgress?.(20, 'Loading PDF document...');
+  const buffer = await file.arrayBuffer();
+  const pdfDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const pages = pdfDoc.getPages();
+  if (pages.length === 0) throw new Error('PDF contains no pages.');
+
+  onProgress?.(45, 'Embedding transparent signature image...');
+  const base64 = signaturePngDataUrl.split(',')[1];
+  const pngBytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const sigImage = await pdfDoc.embedPng(pngBytes);
+  const labelFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  const targetIndices =
+    options.targetPages === 'all'
+      ? pages.map((_, idx) => idx)
+      : options.targetPages === 'first'
+      ? [0]
+      : [pages.length - 1];
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const captionParts: string[] = [];
+  if (options.signerName?.trim()) captionParts.push(sanitizeWinAnsi(options.signerName.trim()));
+  if (options.includeDate) captionParts.push(`Signed ${dateStr}`);
+  const captionText = captionParts.join(' · ');
+
+  onProgress?.(70, `Applying signature to ${targetIndices.length} page(s)...`);
+  for (const idx of targetIndices) {
+    const page = pages[idx];
+    const { width, height } = page.getSize();
+
+    const maxSigW = Math.min(170, width * 0.32);
+    const maxSigH = 68;
+    const scale = Math.min(maxSigW / sigImage.width, maxSigH / sigImage.height, 1);
+    const drawW = sigImage.width * scale;
+    const drawH = sigImage.height * scale;
+
+    const marginX = 48;
+    const marginY = captionText ? 54 : 38;
+
+    let x = width - drawW - marginX;
+    let y = marginY;
+
+    if (options.position === 'bottom-left') {
+      x = marginX;
+      y = marginY;
+    } else if (options.position === 'bottom-center') {
+      x = (width - drawW) / 2;
+      y = marginY;
+    } else if (options.position === 'top-right') {
+      x = width - drawW - marginX;
+      y = height - drawH - 42;
+    }
+
+    page.drawImage(sigImage, { x, y, width: drawW, height: drawH });
+
+    if (captionText) {
+      const captionSize = 8.5;
+      const captionW = labelFont.widthOfTextAtSize(captionText, captionSize);
+      const captionX = Math.max(24, Math.min(width - captionW - 24, x + (drawW - captionW) / 2));
+      page.drawText(captionText, {
+        x: captionX,
+        y: y - 13,
+        size: captionSize,
+        font: labelFont,
+        color: rgb(0.32, 0.32, 0.3),
+      });
+    }
+  }
+
+  onProgress?.(92, 'Saving signed PDF...');
+  const signedBytes = await pdfDoc.save();
+  onProgress?.(100, 'PDF signed successfully!');
+
+  return bytesToBlob(signedBytes);
+}
+
+/**
+ * 29. Word (.docx / .txt) to PDF using Mammoth (Full Multi-Page Structured Layout)
+ */
+export async function wordToPdf(
+  file: File,
+  onProgress?: (percent: number, msg: string) => void
+): Promise<Blob> {
+  onProgress?.(15, `Reading "${file.name}"...`);
+  const arrayBuffer = await file.arrayBuffer();
+  const headerBytes = new Uint8Array(arrayBuffer.slice(0, 4));
+  const isZipContainer =
+    headerBytes[0] === 0x50 &&
+    headerBytes[1] === 0x4b &&
+    (headerBytes[2] === 0x03 || headerBytes[2] === 0x05);
+
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith('.doc') && !isZipContainer) {
+    throw new Error(
+      'Legacy binary .doc format is not supported in browser. Please save as .docx in Microsoft Word / Google Docs and upload again.'
+    );
+  }
+
+  type DocBlock =
+    | { kind: 'h1' | 'h2' | 'h3' | 'p' | 'li'; text: string }
+    | { kind: 'tr'; cells: string[] };
+
+  const blocks: DocBlock[] = [];
+
+  if (isZipContainer || lowerName.endsWith('.docx')) {
+    onProgress?.(35, 'Parsing DOCX structure with Mammoth engine...');
+    const mammothModule = await import('mammoth');
+    const mammoth = (mammothModule as any).default || mammothModule;
+    const { value: html } = await mammoth.convertToHtml({ arrayBuffer });
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    const walk = (node: Element) => {
+      const tag = node.tagName.toLowerCase();
+      if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
+        const text = (node.textContent || '').trim();
+        if (text) blocks.push({ kind: tag, text });
+        return;
+      }
+      if (tag === 'p') {
+        const text = (node.textContent || '').trim();
+        if (text) blocks.push({ kind: 'p', text });
+        return;
+      }
+      if (tag === 'li') {
+        const text = (node.textContent || '').trim();
+        if (text) blocks.push({ kind: 'li', text: `- ${text}` });
+        return;
+      }
+      if (tag === 'tr') {
+        const cells = Array.from(node.querySelectorAll('th, td')).map((c) =>
+          (c.textContent || '').replace(/\s+/g, ' ').trim()
+        );
+        if (cells.some(Boolean)) blocks.push({ kind: 'tr', cells });
+        return;
+      }
+      Array.from(node.children).forEach(walk);
+    };
+
+    Array.from(doc.body.children).forEach(walk);
+  } else {
+    // Plain text / Markdown fallback
+    const rawText = await file.text();
+    rawText.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed) blocks.push({ kind: 'p', text: trimmed });
+    });
+  }
+
+  if (blocks.length === 0) {
+    throw new Error('No readable text content was found inside this Word document.');
+  }
+
+  onProgress?.(60, `Laying out ${blocks.length} document blocks onto A4 pages...`);
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const PAGE_W = 595.28;
+  const PAGE_H = 841.89;
+  const MARGIN_X = 52;
+  const MARGIN_TOP = 56;
+  const MARGIN_BOTTOM = 54;
+  const CONTENT_W = PAGE_W - MARGIN_X * 2;
+
+  let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+  let cursorY = PAGE_H - MARGIN_TOP;
+
+  const ensureSpace = (neededHeight: number) => {
+    if (cursorY - neededHeight < MARGIN_BOTTOM) {
+      page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+      cursorY = PAGE_H - MARGIN_TOP;
+    }
+  };
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (i % 25 === 0) {
+      onProgress?.(
+        60 + Math.round((i / blocks.length) * 30),
+        `Rendering block ${i + 1} of ${blocks.length}...`
+      );
+    }
+
+    if (block.kind === 'tr') {
+      const rowText = block.cells.join('   |   ');
+      const lines = wrapTextLines(rowText, regularFont, 9.5, CONTENT_W - 12);
+      const lineH = 13.5;
+      ensureSpace(lines.length * lineH + 10);
+      lines.forEach((line) => {
+        page.drawText(line, {
+          x: MARGIN_X + 6,
+          y: cursorY,
+          size: 9.5,
+          font: regularFont,
+          color: rgb(0.14, 0.14, 0.14),
+        });
+        cursorY -= lineH;
+      });
+      page.drawLine({
+        start: { x: MARGIN_X, y: cursorY + 4 },
+        end: { x: PAGE_W - MARGIN_X, y: cursorY + 4 },
+        thickness: 0.5,
+        color: rgb(0.84, 0.84, 0.82),
+      });
+      cursorY -= 6;
+      continue;
+    }
+
+    const styleMap = {
+      h1: { font: boldFont, size: 17, lineH: 23, before: 10, after: 8, indent: 0, color: rgb(0.07, 0.07, 0.07) },
+      h2: { font: boldFont, size: 13.5, lineH: 19, before: 8, after: 6, indent: 0, color: rgb(0.1, 0.1, 0.1) },
+      h3: { font: boldFont, size: 11.5, lineH: 16.5, before: 6, after: 4, indent: 0, color: rgb(0.14, 0.14, 0.14) },
+      p: { font: regularFont, size: 10.5, lineH: 15.5, before: 0, after: 7, indent: 0, color: rgb(0.16, 0.16, 0.16) },
+      li: { font: regularFont, size: 10.5, lineH: 15.5, before: 0, after: 4, indent: 12, color: rgb(0.16, 0.16, 0.16) },
+    }[block.kind];
+
+    const lines = wrapTextLines(
+      block.text,
+      styleMap.font,
+      styleMap.size,
+      CONTENT_W - styleMap.indent
+    );
+    if (lines.length === 0) continue;
+
+    if (cursorY < PAGE_H - MARGIN_TOP) {
+      cursorY -= styleMap.before;
+    }
+
+    for (const line of lines) {
+      ensureSpace(styleMap.lineH);
+      page.drawText(line, {
+        x: MARGIN_X + styleMap.indent,
+        y: cursorY,
+        size: styleMap.size,
+        font: styleMap.font,
+        color: styleMap.color,
+      });
+      cursorY -= styleMap.lineH;
+    }
+    cursorY -= styleMap.after;
+  }
+
+  // Stamp clean page numbers at footer
+  const allPages = pdfDoc.getPages();
+  allPages.forEach((p, idx) => {
+    const label = `${idx + 1} / ${allPages.length}`;
+    const labelW = regularFont.widthOfTextAtSize(label, 8.5);
+    p.drawText(label, {
+      x: PAGE_W - MARGIN_X - labelW,
+      y: 26,
+      size: 8.5,
+      font: regularFont,
+      color: rgb(0.45, 0.45, 0.43),
+    });
+  });
+
+  pdfDoc.setTitle(file.name.replace(/\.[^/.]+$/, ''));
+  pdfDoc.setProducer('PurePDF Client Engine (Mammoth + pdf-lib)');
+
+  onProgress?.(94, 'Compiling final PDF...');
+  const pdfBytes = await pdfDoc.save({ useObjectStreams: true });
+  onProgress?.(100, 'Word to PDF conversion complete!');
+
+  return bytesToBlob(pdfBytes);
+}
+
+/**
+ * 30. Excel (.xlsx / .xls / .csv) to PDF using SheetJS (xlsx)
+ * Renders all worksheets into structured multi-page A4 landscape tables.
+ */
+export async function excelToPdf(
+  file: File,
+  onProgress?: (percent: number, msg: string) => void
+): Promise<Blob> {
+  onProgress?.(15, `Reading workbook "${file.name}"...`);
+  const arrayBuffer = await file.arrayBuffer();
+  const XLSX = await import('xlsx');
+
+  onProgress?.(35, 'Parsing sheets and cell values...');
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  const sheetNames = workbook.SheetNames;
+  if (!sheetNames || sheetNames.length === 0) {
+    throw new Error('No worksheets found in this spreadsheet file.');
+  }
+
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  // A4 Landscape for wide tabular data
+  const PAGE_W = 841.89;
+  const PAGE_H = 595.28;
+  const MARGIN_X = 36;
+  const MARGIN_TOP = 44;
+  const MARGIN_BOTTOM = 42;
+  const CONTENT_W = PAGE_W - MARGIN_X * 2;
+
+  for (let sIdx = 0; sIdx < sheetNames.length; sIdx++) {
+    const sheetName = sheetNames[sIdx];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' }) as any[][];
+
+    onProgress?.(
+      40 + Math.round((sIdx / sheetNames.length) * 48),
+      `Rendering sheet "${sheetName}" (${rows.length} rows)...`
+    );
+
+    let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+    let cursorY = PAGE_H - MARGIN_TOP;
+
+    const drawSheetHeader = (continued = false) => {
+      const title = sanitizeWinAnsi(
+        continued ? `${sheetName} (continued)` : `Sheet: ${sheetName}`
+      );
+      page.drawText(title, {
+        x: MARGIN_X,
+        y: cursorY,
+        size: 13,
+        font: boldFont,
+        color: rgb(0.07, 0.07, 0.07),
+      });
+      cursorY -= 18;
+    };
+
+    drawSheetHeader(false);
+
+    if (rows.length === 0) {
+      page.drawText('(Empty worksheet)', {
+        x: MARGIN_X,
+        y: cursorY,
+        size: 10,
+        font: regularFont,
+        color: rgb(0.45, 0.45, 0.43),
+      });
+      continue;
+    }
+
+    const maxCols = Math.min(
+      12,
+      Math.max(1, ...rows.map((r) => (Array.isArray(r) ? r.length : 1)))
+    );
+    const colW = CONTENT_W / maxCols;
+    const cellPad = 5;
+    const fontSize = maxCols > 8 ? 7.5 : 8.5;
+    const lineH = fontSize + 3.5;
+
+    for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+      const row = Array.isArray(rows[rIdx]) ? rows[rIdx] : [rows[rIdx]];
+      const isHeaderRow = rIdx === 0;
+      const cellFont = isHeaderRow ? boldFont : regularFont;
+
+      const wrappedCols: string[][] = [];
+      let maxLines = 1;
+      for (let c = 0; c < maxCols; c++) {
+        const val = row[c] !== undefined && row[c] !== null ? String(row[c]) : '';
+        const lines = wrapTextLines(val, cellFont, fontSize, colW - cellPad * 2).slice(0, 4);
+        wrappedCols.push(lines);
+        if (lines.length > maxLines) maxLines = lines.length;
+      }
+
+      const rowHeight = Math.max(18, maxLines * lineH + 8);
+      if (cursorY - rowHeight < MARGIN_BOTTOM) {
+        page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+        cursorY = PAGE_H - MARGIN_TOP;
+        drawSheetHeader(true);
+      }
+
+      // Header or alternating row background
+      if (isHeaderRow) {
+        page.drawRectangle({
+          x: MARGIN_X,
+          y: cursorY - rowHeight + 4,
+          width: CONTENT_W,
+          height: rowHeight,
+          color: rgb(0.92, 0.92, 0.9),
+        });
+      } else if (rIdx % 2 === 0) {
+        page.drawRectangle({
+          x: MARGIN_X,
+          y: cursorY - rowHeight + 4,
+          width: CONTENT_W,
+          height: rowHeight,
+          color: rgb(0.975, 0.975, 0.97),
+        });
+      }
+
+      // Draw cell contents + vertical hairlines
+      for (let c = 0; c < maxCols; c++) {
+        const cellX = MARGIN_X + c * colW;
+        const lines = wrappedCols[c];
+        lines.forEach((line, lIdx) => {
+          page.drawText(line, {
+            x: cellX + cellPad,
+            y: cursorY - 9 - lIdx * lineH,
+            size: fontSize,
+            font: cellFont,
+            color: rgb(0.1, 0.1, 0.1),
+          });
+        });
+
+        if (c > 0) {
+          page.drawLine({
+            start: { x: cellX, y: cursorY + 4 },
+            end: { x: cellX, y: cursorY - rowHeight + 4 },
+            thickness: 0.4,
+            color: rgb(0.86, 0.86, 0.84),
+          });
+        }
+      }
+
+      // Horizontal row hairline
+      page.drawLine({
+        start: { x: MARGIN_X, y: cursorY - rowHeight + 4 },
+        end: { x: PAGE_W - MARGIN_X, y: cursorY - rowHeight + 4 },
+        thickness: isHeaderRow ? 0.9 : 0.4,
+        color: isHeaderRow ? rgb(0.6, 0.6, 0.58) : rgb(0.86, 0.86, 0.84),
+      });
+
+      cursorY -= rowHeight;
+    }
+  }
+
+  // Page numbers
+  const pages = pdfDoc.getPages();
+  pages.forEach((p, idx) => {
+    const label = `${idx + 1} / ${pages.length}`;
+    const labelW = regularFont.widthOfTextAtSize(label, 8.5);
+    p.drawText(label, {
+      x: PAGE_W - MARGIN_X - labelW,
+      y: 20,
+      size: 8.5,
+      font: regularFont,
+      color: rgb(0.45, 0.45, 0.43),
+    });
+  });
+
+  pdfDoc.setTitle(file.name.replace(/\.[^/.]+$/, ''));
+  pdfDoc.setProducer('PurePDF Client Engine (SheetJS + pdf-lib)');
+
+  onProgress?.(94, 'Compiling spreadsheet PDF...');
+  const bytes = await pdfDoc.save({ useObjectStreams: true });
+  onProgress?.(100, 'Excel to PDF conversion complete!');
+  return bytesToBlob(bytes);
+}
+
+/**
+ * 31. PowerPoint (.pptx) to PDF using JSZip + OOXML Slide XML parser
+ * Extracts every slide's title and bullet paragraphs into 16:9 widescreen PDF pages.
+ */
+export async function pptToPdf(
+  file: File,
+  onProgress?: (percent: number, msg: string) => void
+): Promise<Blob> {
+  onProgress?.(15, `Opening presentation "${file.name}"...`);
+  const arrayBuffer = await file.arrayBuffer();
+  const header = new Uint8Array(arrayBuffer.slice(0, 4));
+  const isZip = header[0] === 0x50 && header[1] === 0x4b && (header[2] === 0x03 || header[2] === 0x05);
+  if (!isZip) {
+    throw new Error(
+      'Legacy binary .ppt format is not supported in browser. Please save as .pptx and upload again.'
+    );
+  }
+
+  const zip = await JSZip.loadAsync(arrayBuffer);
+  const slidePaths = Object.keys(zip.files)
+    .filter((p) => /^ppt\/slides\/slide\d+\.xml$/i.test(p))
+    .sort((a, b) => {
+      const na = parseInt(a.match(/slide(\d+)\.xml/i)?.[1] || '0', 10);
+      const nb = parseInt(b.match(/slide(\d+)\.xml/i)?.[1] || '0', 10);
+      return na - nb;
+    });
+
+  if (slidePaths.length === 0) {
+    throw new Error('No slides (ppt/slides/slide*.xml) were found inside this .pptx archive.');
+  }
+
+  onProgress?.(35, `Extracting ${slidePaths.length} slide(s)...`);
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  // 16:9 Widescreen Slide dimensions (720 x 405 pt)
+  const SLIDE_W = 720;
+  const SLIDE_H = 405;
+  const MARGIN_X = 48;
+  const CONTENT_W = SLIDE_W - MARGIN_X * 2;
+  const parser = new DOMParser();
+
+  for (let i = 0; i < slidePaths.length; i++) {
+    onProgress?.(
+      35 + Math.round((i / slidePaths.length) * 55),
+      `Rendering slide ${i + 1} of ${slidePaths.length}...`
+    );
+
+    const xmlText = await zip.files[slidePaths[i]].async('string');
+    const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+
+    // Collect paragraphs (<a:p>) by joining their text runs (<a:t>)
+    const pNodes = Array.from(xmlDoc.getElementsByTagName('*')).filter(
+      (el) => el.localName === 'p'
+    );
+    const paragraphs: string[] = [];
+    for (const pNode of pNodes) {
+      const tNodes = Array.from(pNode.getElementsByTagName('*')).filter(
+        (el) => el.localName === 't'
+      );
+      const text = tNodes
+        .map((t) => t.textContent || '')
+        .join('')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (text) paragraphs.push(text);
+    }
+
+    const page = pdfDoc.addPage([SLIDE_W, SLIDE_H]);
+
+    // Subtle Swiss top accent bar & slide counter
+    page.drawRectangle({
+      x: 0,
+      y: SLIDE_H - 5,
+      width: SLIDE_W,
+      height: 5,
+      color: rgb(1, 0.216, 0),
+    });
+
+    const slideTag = `SLIDE ${String(i + 1).padStart(2, '0')} / ${String(slidePaths.length).padStart(2, '0')}`;
+    page.drawText(slideTag, {
+      x: MARGIN_X,
+      y: SLIDE_H - 34,
+      size: 9,
+      font: boldFont,
+      color: rgb(0.45, 0.45, 0.43),
+    });
+
+    let cursorY = SLIDE_H - 68;
+
+    if (paragraphs.length === 0) {
+      page.drawText('(Visual / Image Slide)', {
+        x: MARGIN_X,
+        y: cursorY,
+        size: 14,
+        font: regularFont,
+        color: rgb(0.5, 0.5, 0.48),
+      });
+      continue;
+    }
+
+    // First paragraph rendered as Slide Title
+    const titleLines = wrapTextLines(paragraphs[0], boldFont, 22, CONTENT_W).slice(0, 3);
+    for (const line of titleLines) {
+      page.drawText(line, {
+        x: MARGIN_X,
+        y: cursorY,
+        size: 22,
+        font: boldFont,
+        color: rgb(0.07, 0.07, 0.07),
+      });
+      cursorY -= 28;
+    }
+
+    page.drawLine({
+      start: { x: MARGIN_X, y: cursorY + 8 },
+      end: { x: SLIDE_W - MARGIN_X, y: cursorY + 8 },
+      thickness: 0.75,
+      color: rgb(0.86, 0.86, 0.84),
+    });
+    cursorY -= 14;
+
+    // Remaining paragraphs as slide body / bullets
+    for (let pIdx = 1; pIdx < paragraphs.length; pIdx++) {
+      if (cursorY < 36) break;
+      const bulletLines = wrapTextLines(`- ${paragraphs[pIdx]}`, regularFont, 12.5, CONTENT_W - 8);
+      for (const line of bulletLines) {
+        if (cursorY < 36) break;
+        page.drawText(line, {
+          x: MARGIN_X + 6,
+          y: cursorY,
+          size: 12.5,
+          font: regularFont,
+          color: rgb(0.18, 0.18, 0.17),
+        });
+        cursorY -= 18;
+      }
+      cursorY -= 6;
+    }
+  }
+
+  pdfDoc.setTitle(file.name.replace(/\.[^/.]+$/, ''));
+  pdfDoc.setProducer('PurePDF Client Engine (OOXML Slide Parser + pdf-lib)');
+
+  onProgress?.(94, 'Saving presentation PDF...');
+  const bytes = await pdfDoc.save({ useObjectStreams: true });
+  onProgress?.(100, 'PowerPoint to PDF conversion complete!');
+  return bytesToBlob(bytes);
+}
+
+/**
+ * 32. HTML (.html / .htm) to PDF using DOMParser semantic layout
+ * Strips scripts/styles and renders structured headings, paragraphs, lists, code, and tables.
+ */
+export async function htmlToPdf(
+  file: File,
+  onProgress?: (percent: number, msg: string) => void
+): Promise<Blob> {
+  onProgress?.(15, `Parsing HTML document "${file.name}"...`);
+  const htmlSource = await file.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(htmlSource, 'text/html');
+
+  // Remove non-visible tags
+  doc.querySelectorAll('script, style, noscript, svg, template').forEach((el) => el.remove());
+
+  type HtmlBlock =
+    | { kind: 'h1' | 'h2' | 'h3' | 'p' | 'li' | 'pre'; text: string }
+    | { kind: 'tr'; cells: string[] };
+
+  const blocks: HtmlBlock[] = [];
+  const walk = (node: Element) => {
+    const tag = node.tagName.toLowerCase();
+    if (tag === 'h1' || tag === 'h2' || tag === 'h3') {
+      const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text) blocks.push({ kind: tag, text });
+      return;
+    }
+    if (tag === 'p' || tag === 'blockquote') {
+      const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text) blocks.push({ kind: 'p', text });
+      return;
+    }
+    if (tag === 'li') {
+      const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text) blocks.push({ kind: 'li', text: `- ${text}` });
+      return;
+    }
+    if (tag === 'pre') {
+      const text = (node.textContent || '').trim();
+      if (text) blocks.push({ kind: 'pre', text });
+      return;
+    }
+    if (tag === 'tr') {
+      const cells = Array.from(node.querySelectorAll('th, td')).map((c) =>
+        (c.textContent || '').replace(/\s+/g, ' ').trim()
+      );
+      if (cells.some(Boolean)) blocks.push({ kind: 'tr', cells });
+      return;
+    }
+    if (node.children.length === 0) {
+      const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text) blocks.push({ kind: 'p', text });
+      return;
+    }
+    Array.from(node.children).forEach(walk);
+  };
+
+  if (doc.body) {
+    Array.from(doc.body.children).forEach(walk);
+    if (blocks.length === 0 && doc.body.textContent?.trim()) {
+      blocks.push({ kind: 'p', text: doc.body.textContent.trim() });
+    }
+  }
+
+  if (blocks.length === 0) {
+    throw new Error('No visible HTML content found to render.');
+  }
+
+  onProgress?.(45, `Rendering ${blocks.length} HTML elements onto A4 pages...`);
+  const pdfDoc = await PDFDocument.create();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const monoFont = await pdfDoc.embedFont(StandardFonts.Courier);
+
+  const PAGE_W = 595.28;
+  const PAGE_H = 841.89;
+  const MARGIN_X = 50;
+  const MARGIN_TOP = 54;
+  const MARGIN_BOTTOM = 52;
+  const CONTENT_W = PAGE_W - MARGIN_X * 2;
+
+  let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+  let cursorY = PAGE_H - MARGIN_TOP;
+
+  const ensureSpace = (needed: number) => {
+    if (cursorY - needed < MARGIN_BOTTOM) {
+      page = pdfDoc.addPage([PAGE_W, PAGE_H]);
+      cursorY = PAGE_H - MARGIN_TOP;
+    }
+  };
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (block.kind === 'tr') {
+      const rowStr = block.cells.join('   |   ');
+      const lines = wrapTextLines(rowStr, regularFont, 9.5, CONTENT_W - 10);
+      ensureSpace(lines.length * 13.5 + 8);
+      lines.forEach((line) => {
+        page.drawText(line, { x: MARGIN_X + 5, y: cursorY, size: 9.5, font: regularFont, color: rgb(0.14, 0.14, 0.14) });
+        cursorY -= 13.5;
+      });
+      page.drawLine({
+        start: { x: MARGIN_X, y: cursorY + 4 },
+        end: { x: PAGE_W - MARGIN_X, y: cursorY + 4 },
+        thickness: 0.5,
+        color: rgb(0.84, 0.84, 0.82),
+      });
+      cursorY -= 6;
+      continue;
+    }
+
+    const styles = {
+      h1: { font: boldFont, size: 18, lineH: 24, before: 10, after: 8, indent: 0 },
+      h2: { font: boldFont, size: 14, lineH: 19, before: 8, after: 6, indent: 0 },
+      h3: { font: boldFont, size: 11.5, lineH: 16, before: 6, after: 4, indent: 0 },
+      p: { font: regularFont, size: 10.5, lineH: 15.5, before: 0, after: 7, indent: 0 },
+      li: { font: regularFont, size: 10.5, lineH: 15.5, before: 0, after: 4, indent: 12 },
+      pre: { font: monoFont, size: 9, lineH: 13, before: 4, after: 8, indent: 8 },
+    }[block.kind];
+
+    const lines = wrapTextLines(block.text, styles.font, styles.size, CONTENT_W - styles.indent);
+    if (lines.length === 0) continue;
+
+    if (cursorY < PAGE_H - MARGIN_TOP) cursorY -= styles.before;
+    for (const line of lines) {
+      ensureSpace(styles.lineH);
+      page.drawText(line, {
+        x: MARGIN_X + styles.indent,
+        y: cursorY,
+        size: styles.size,
+        font: styles.font,
+        color: rgb(0.12, 0.12, 0.12),
+      });
+      cursorY -= styles.lineH;
+    }
+    cursorY -= styles.after;
+  }
+
+  pdfDoc.setTitle(doc.title || file.name.replace(/\.[^/.]+$/, ''));
+  pdfDoc.setProducer('PurePDF Client Engine (HTML DOM Parser + pdf-lib)');
+
+  onProgress?.(94, 'Compiling HTML PDF...');
+  const bytes = await pdfDoc.save({ useObjectStreams: true });
+  onProgress?.(100, 'HTML to PDF conversion complete!');
   return bytesToBlob(bytes);
 }

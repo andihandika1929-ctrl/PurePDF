@@ -3,9 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useApp } from '@/context/AppContext';
 import { AdSlot } from '@/components/layout/AdSlot';
-import { Button } from '@/components/ui/Button';
+import { CircularProgressRing, AnimatedCheckmark } from '@/components/ui/MotionStatus';
+import { SPRINGS, EASES } from '@/lib/motion';
 import { jobStore, ProcessedJob } from '@/lib/jobStore';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import {
@@ -147,13 +149,24 @@ export default function DownloadPage({ params }: { params: { jobId: string } }) 
       {/* Main Download Bento Card */}
       <div className="bento-card p-6 sm:p-10 space-y-8 bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10 text-center max-w-2xl mx-auto shadow-[0px_8px_32px_rgba(0,0,0,0.08)]">
         
-        {/* Header Icon */}
-        <div className="inline-flex items-center justify-center p-4 rounded-3xl bg-neutral-100 dark:bg-zinc-800 text-black dark:text-white shadow-[0px_2px_8px_rgba(0,0,0,0.06)]">
-          {secondsLeft === 0 ? (
-            <CheckCircle2 className="w-10 h-10 text-emerald-500 animate-in zoom-in-75 duration-200" />
-          ) : (
-            <Clock className="w-10 h-10 text-[#ff3700] animate-pulse" />
-          )}
+        {/* Header Icon: Circular Progress Ring (Countdown) -> SVG-Draw Checkmark (Ready) */}
+        <div className="flex justify-center">
+          <AnimatePresence mode="wait">
+            {secondsLeft === 0 ? (
+              <motion.div key="ready-check" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                <AnimatedCheckmark size={76} />
+              </motion.div>
+            ) : (
+              <motion.div key="countdown-ring" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <CircularProgressRing
+                  progress={progressPercentage}
+                  size={84}
+                  strokeWidth={4.5}
+                  label={`${secondsLeft}s`}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Heading & Status */}
@@ -256,25 +269,32 @@ export default function DownloadPage({ params }: { params: { jobId: string } }) 
             </div>
           </div>
         ) : (
-          /* Ready Action Panel */
-          <div className="space-y-4 max-w-md mx-auto animate-in fade-in duration-300">
-            <Button
-              size="lg"
-              variant="accent"
+          /* Ready Action Panel (Framer Motion — no dead animate-in) */
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, ease: EASES.precision }}
+            className="space-y-4 max-w-md mx-auto"
+          >
+            <motion.button
+              type="button"
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.97 }}
+              transition={SPRINGS.tactile}
               onClick={handleDownload}
-              className="w-full !h-14 !text-base shadow-[0px_4px_20px_rgba(255,55,0,0.4)]"
+              className="w-full h-14 px-8 rounded-full bg-[var(--color-success)] hover:brightness-110 text-white font-display font-semibold text-base inline-flex items-center justify-center gap-2.5 shadow-card-elevated transition-[filter]"
             >
-              <Download className="w-5 h-5 mr-2" />
+              <Download className="w-5 h-5" />
               <span>{isDownloaded ? t.download.downloadAgain : t.download.downloadBtn}</span>
-            </Button>
+            </motion.button>
 
             {isDownloaded && (
-              <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-mono">
+              <div className="flex items-center justify-center gap-1.5 text-xs text-[var(--color-success)] font-mono">
                 <CheckCircle2 className="w-4 h-4" />
                 <span>{t.download.downloadStarted}</span>
               </div>
             )}
-          </div>
+          </motion.div>
         )}
 
         {/* File Job Info */}

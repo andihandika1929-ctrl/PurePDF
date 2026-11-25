@@ -9,20 +9,26 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@pdfsmaller/pdf-encrypt-lite": "^1.2.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.119.2",
     "@types/fabric": "^5.3.11",
     "@types/jszip": "^3.4.1",
     "clsx": "^2.1.1",
     "fabric": "^6.9.1",
+    "framer-motion": "^14.14.0",
     "jszip": "^3.10.2",
+    "lenis": "^1.3.28",
     "lucide-react": "^0.453.0",
+    "mammoth": "^1.13.0",
     "next": "14.2.15",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
+    "pptxgenjs": "^4.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.5.4"
+    "tailwind-merge": "^2.5.4",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
